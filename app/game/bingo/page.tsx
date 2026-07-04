@@ -15,7 +15,7 @@ import { getPlayerRank } from "@/lib/ranking";
 import { calculateBingoSelection, getBingoTargetWords } from "@/lib/bingo-scoring";
 import { localizedWord } from "@/lib/i18n/question";
 import { getGameResult } from "@/lib/storage";
-import { useCurrentPlayer, useQuestions, useSubmitGameResult, useAppState } from "@/hooks/use-game-data.optimized";
+import { useCurrentPlayer, useQuestions, useSubmitGameResult, useAppState } from "@/hooks/use-game-data";
 import type { Question } from "@/types";
 import type { ReactNode } from "react";
 
@@ -363,7 +363,7 @@ export default function BingoPage() {
     return (
       <BingoShell>
         <section className="bingoMainCard bingoMainCard--status">
-          <p className="bingoStatusMessage">{t("common.questionsLoading")}</p>
+          <p className="bingoStatusMessage">{questions.loading ? t("common.questionsLoading") : t("common.questionsReloading", { error: questions.error || t("common.noQuestions") })}</p>
         </section>
       </BingoShell>
     );
@@ -474,24 +474,19 @@ export default function BingoPage() {
 
         <div className="bingoGridWrap">
           <div className="bingoGrid">
-            {Array.from({ length: 9 }).map((_, index) => {
-              const displayWord = selectedDisplayWords[index] || "";
-              const hasWord = Boolean(selectedWords[index]);
-
-              return (
-                <div className={hasWord ? "lit" : ""} key={index}>
-                  <span
-                    style={
-                      displayWord
-                        ? { fontSize: `${getGridFontSize(displayWord)}px` }
-                        : undefined
-                    }
-                  >
-                    {displayWord}
-                  </span>
-                </div>
-              );
-            })}
+            {Array.from({ length: 9 }).map((_, index) => (
+              <div className={selectedWords[index] ? "lit" : ""} key={index}>
+                <span
+                  style={
+                    selectedWords[index]
+                      ? { fontSize: `${getGridFontSize(selectedWords[index])}px` }
+                      : undefined
+                  }
+                >
+                  {selectedWords[index] || ""}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </section>

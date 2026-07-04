@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// 排行榜聚合数据：服务端内存缓存（TTL=3s，与客户端轮询间隔对齐）。
+// 排行榜聚合数据：服务端内存缓存（TTL=2s）。
 // 关键点：
 // 1) PocketBase JSVM 路由处理器无法访问文件级变量，状态放进 app.store()
 //    （并发安全的进程内 KV，跨请求共享）。
@@ -10,7 +10,7 @@
 // 收益：高并发下同一时间窗内只触发 1 次全表读+1 次序列化，其余请求近乎零成本命中。
 routerAdd("GET", "/api/ranking-data", (e) => {
   try {
-    const TTL_MS = 3000;
+    const TTL_MS = 2000;
     const store = e.app.store();
     const now = Date.now();
 

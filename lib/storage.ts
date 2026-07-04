@@ -333,7 +333,7 @@ export function validatePhone(phone: string): boolean {
 export async function registerPlayer(input: { name: string; phone: string; office: string; team: string }): Promise<{ player: Player; reused: boolean }> {
   const available = await checkBackend();
   if (available) {
-    await pbStorage.ensureCollectionsOnce();
+    await pbStorage.ensureCollections();
     return await pbStorage.registerPlayer(input);
   }
 

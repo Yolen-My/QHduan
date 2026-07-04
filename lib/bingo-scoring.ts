@@ -5,34 +5,8 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function normalizeBingoWord(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-function getQuestionWords(question: Question): string[] {
-  return [question.title, question.titleEn].filter((word): word is string => Boolean(word));
-}
-
-function getCorrectAnswerWords(question: Question): string[] {
-  const raw = Array.isArray(question.correctAnswer) ? question.correctAnswer : [question.correctAnswer];
-  const rawEn = Array.isArray(question.correctAnswerEn)
-    ? question.correctAnswerEn
-    : question.correctAnswerEn !== undefined
-      ? [question.correctAnswerEn]
-      : [];
-  return [...raw, ...rawEn].filter((word): word is string => typeof word === "string" && word.trim().length > 0);
-}
-
-function questionMatchesWord(question: Question, word: string): boolean {
-  const normalized = normalizeBingoWord(word);
-  return getQuestionWords(question).some((candidate) => normalizeBingoWord(candidate) === normalized);
-}
-
 export function isBingoCorrectQuestion(question: Question): boolean {
-  if (question.gameKey !== "bingo") return false;
-  const questionWords = getQuestionWords(question).map(normalizeBingoWord);
-  const correctWords = getCorrectAnswerWords(question).map(normalizeBingoWord);
-  return correctWords.some((answer) => questionWords.includes(answer));
+  return question.gameKey === "bingo" && typeof question.correctAnswer === "string" && question.correctAnswer === question.title;
 }
 
 export function getBingoTargetWords(questions: Question[]): string[] {
@@ -55,24 +29,16 @@ export function calculateBingoSelection(
     .map((id) => bingoQuestions.find((question) => question.id === id))
     .filter((question): question is Question => Boolean(question));
 
-  const fallbackWords = asStringArray(answers.selectedWords);
   const selectedWords = selectedQuestions.length > 0
     ? selectedQuestions.map((question) => question.title)
-    : fallbackWords;
+    : asStringArray(answers.selectedWords);
   const targetWords = getBingoTargetWords(bingoQuestions);
-  const targetWordSet = new Set(targetWords.map(normalizeBingoWord));
 
   const correctCount = selectedQuestions.length > 0
     ? selectedQuestions.filter(isBingoCorrectQuestion).length +
       (selectedQuestions.length === 9 && selectedQuestions.every(isBingoCorrectQuestion) ? 1 : 0)
-    : fallbackWords.filter((word) => {
-        const matchedQuestion = bingoQuestions.find((question) => questionMatchesWord(question, word));
-        return matchedQuestion ? isBingoCorrectQuestion(matchedQuestion) : targetWordSet.has(normalizeBingoWord(word));
-      }).length +
-      (fallbackWords.length === 9 && fallbackWords.every((word) => {
-        const matchedQuestion = bingoQuestions.find((question) => questionMatchesWord(question, word));
-        return matchedQuestion ? isBingoCorrectQuestion(matchedQuestion) : targetWordSet.has(normalizeBingoWord(word));
-      }) ? 1 : 0);
+    : selectedWords.filter((word) => targetWords.includes(word)).length +
+      (selectedWords.length === 9 && selectedWords.every((word) => targetWords.includes(word)) ? 1 : 0);
 
   const score = selectedWords.length === 0 && selectedQuestions.length === 0
     ? Math.max(0, Math.min(100, Math.round(fallbackScore)))

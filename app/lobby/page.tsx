@@ -9,7 +9,7 @@ import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import ScorePanel from "@/components/ScorePanel";
 import { restoreCurrentPlayerFromLocal } from "@/lib/storage";
-import { useCurrentPlayer, useLobbySnapshot } from "@/hooks/use-game-data.optimized";
+import { useCurrentPlayer, useLobbySnapshot } from "@/hooks/use-game-data";
 
 export default function LobbyPage() {
   const router = useRouter();

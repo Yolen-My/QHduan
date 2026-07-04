@@ -31,17 +31,10 @@ const getPollingInterval = () => {
   }
   return process.env.NEXT_PUBLIC_POLLING_INTERVAL 
     ? parseInt(process.env.NEXT_PUBLIC_POLLING_INTERVAL, 10) 
-    : 3000; // 生产环境默认3秒（配合服务端缓存降低 DB 压力）
+    : 2000; // 生产环境默认2秒
 };
 
 const STATE_REFRESH_INTERVAL_MS = getPollingInterval();
-
-// 随机抖动（jitter）：在基础间隔上增加 ±20% 随机偏移，防止所有客户端同时发起请求（惊群效应）
-function getJitteredInterval(): number {
-  const base = STATE_REFRESH_INTERVAL_MS;
-  const jitter = base * 0.2 * (Math.random() * 2 - 1); // ±20%
-  return Math.round(base + jitter);
-}
 
 // 请求缓存管理
 const requestCache = new Map<string, {
@@ -49,7 +42,7 @@ const requestCache = new Map<string, {
   timestamp: number;
 }>();
 
-const CACHE_DURATION = 1500; // 缓存1.5秒
+const CACHE_DURATION = 1000; // 缓存1秒
 
 function getCachedRequest<T>(key: string): T | null {
   const cached = requestCache.get(key);
@@ -127,32 +120,18 @@ export function useAppState() {
     const unsubscribe = subscribeToState(() => {
       // 订阅更新时清除缓存
       requestCache.clear();
-      globalState = null; // 强制下次刷新走服务端缓存
       refresh();
     });
 
-    // 使用 jitter 防止惊群效应
-    let timer = window.setInterval(() => {
+    const timer = window.setInterval(() => {
       requestCache.clear(); // 定期清除缓存
-      globalState = null;
       refresh();
-    }, getJitteredInterval());
-
-    // 定时重置 jitter，避免间隔固化
-    const jitterResetTimer = window.setInterval(() => {
-      window.clearInterval(timer);
-      timer = window.setInterval(() => {
-        requestCache.clear();
-        globalState = null;
-        refresh();
-      }, getJitteredInterval());
-    }, 30000);
+    }, STATE_REFRESH_INTERVAL_MS);
     
     return () => {
       mountedRef.current = false;
       unsubscribe();
       window.clearInterval(timer);
-      window.clearInterval(jitterResetTimer);
     };
   }, [refresh]);
 
@@ -164,8 +143,6 @@ export function useCurrentPlayer() {
   const [playerId, setPlayerId] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(true);
-  const retryCountRef = useRef(0);
-  const MAX_RETRIES = 5;
 
   const refresh = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -176,7 +153,6 @@ export function useCurrentPlayer() {
       if (!id) {
         setPlayer(null);
         setLoading(false);
-        retryCountRef.current = 0;
         return;
       }
       
@@ -185,37 +161,20 @@ export function useCurrentPlayer() {
       if (cached) {
         setPlayer(cached);
         setLoading(false);
-        retryCountRef.current = 0;
         return;
       }
       
       const p = await getCurrentPlayer();
       if (mountedRef.current) {
-        if (p) {
-          setPlayer(p);
-          setCachedRequest(cacheKey, p);
-          setLoading(false);
-          retryCountRef.current = 0;
-        } else if (retryCountRef.current < MAX_RETRIES) {
-          // player 为 null 但 playerId 存在，说明查询失败，保留 playerId 等待重试
-          retryCountRef.current++;
-          console.warn(`⏳ getCurrentPlayer 返回 null (playerId=${id})，第 ${retryCountRef.current}/${MAX_RETRIES} 次重试...`);
-          // 不 setLoading(false)，让页面继续显示 loading 状态等待重试
-        } else {
-          // 超过最大重试次数，放弃
-          console.error(`❌ getCurrentPlayer 重试 ${MAX_RETRIES} 次后仍然失败，playerId=${id}`);
-          setLoading(false);
-        }
+        setPlayer(p);
+        setCachedRequest(cacheKey, p);
+        setLoading(false);
       }
     } catch {
       if (mountedRef.current) {
-        // catch 中不要清除 playerId，保留等待重试
-        retryCountRef.current++;
-        if (retryCountRef.current >= MAX_RETRIES) {
-          setPlayer(null);
-          setPlayerId(null);
-          setLoading(false);
-        }
+        setPlayer(null);
+        setPlayerId(null);
+        setLoading(false);
       }
     }
   }, []);
@@ -224,22 +183,14 @@ export function useCurrentPlayer() {
     refresh();
     const unsubscribe = subscribeToState(() => {
       requestCache.clear();
-      retryCountRef.current = 0;
       refresh();
     });
 
-    // 使用 jitter 防止惊群效应
-    let timer = window.setInterval(refresh, getJitteredInterval());
-    const jitterResetTimer = window.setInterval(() => {
-      window.clearInterval(timer);
-      timer = window.setInterval(refresh, getJitteredInterval());
-    }, 30000);
-
+    const timer = window.setInterval(refresh, STATE_REFRESH_INTERVAL_MS);
     return () => {
       mountedRef.current = false;
       unsubscribe();
       window.clearInterval(timer);
-      window.clearInterval(jitterResetTimer);
     };
   }, [refresh]);
 
@@ -315,17 +266,11 @@ export function useGameStatus(gameKey: GameKey) {
       refresh();
     });
 
-    let timer = window.setInterval(refresh, getJitteredInterval());
-    const jitterResetTimer = window.setInterval(() => {
-      window.clearInterval(timer);
-      timer = window.setInterval(refresh, getJitteredInterval());
-    }, 30000);
-
+    const timer = window.setInterval(refresh, STATE_REFRESH_INTERVAL_MS);
     return () => {
       mountedRef.current = false;
       unsubscribe();
       window.clearInterval(timer);
-      window.clearInterval(jitterResetTimer);
     };
   }, [refresh]);
 
@@ -373,17 +318,11 @@ export function useExistingResult(playerId: string | null | undefined, gameKey: 
       refresh();
     });
 
-    let timer = window.setInterval(refresh, getJitteredInterval());
-    const jitterResetTimer = window.setInterval(() => {
-      window.clearInterval(timer);
-      timer = window.setInterval(refresh, getJitteredInterval());
-    }, 30000);
-
+    const timer = window.setInterval(refresh, STATE_REFRESH_INTERVAL_MS);
     return () => {
       mountedRef.current = false;
       unsubscribe();
       window.clearInterval(timer);
-      window.clearInterval(jitterResetTimer);
     };
   }, [refresh]);
 
@@ -432,18 +371,11 @@ export function useLobbySnapshot(playerId: string | null | undefined) {
       requestCache.clear();
       refresh();
     });
-
-    let timer = window.setInterval(refresh, getJitteredInterval());
-    const jitterResetTimer = window.setInterval(() => {
-      window.clearInterval(timer);
-      timer = window.setInterval(refresh, getJitteredInterval());
-    }, 30000);
-
+    const timer = window.setInterval(refresh, STATE_REFRESH_INTERVAL_MS);
     return () => {
       mountedRef.current = false;
       unsubscribe();
       window.clearInterval(timer);
-      window.clearInterval(jitterResetTimer);
     };
   }, [refresh]);
 
@@ -504,18 +436,11 @@ export function useRanking(playerId?: string | null, intervalMs?: number) {
       refresh();
     });
 
-    const baseInterval = intervalMs || STATE_REFRESH_INTERVAL_MS;
-    let timer = window.setInterval(refresh, baseInterval + Math.round(baseInterval * 0.2 * (Math.random() * 2 - 1)));
-    const jitterResetTimer = window.setInterval(() => {
-      window.clearInterval(timer);
-      timer = window.setInterval(refresh, baseInterval + Math.round(baseInterval * 0.2 * (Math.random() * 2 - 1)));
-    }, 30000);
-
+    const timer = window.setInterval(refresh, intervalMs || STATE_REFRESH_INTERVAL_MS);
     return () => {
       mountedRef.current = false;
       unsubscribe();
       window.clearInterval(timer);
-      window.clearInterval(jitterResetTimer);
     };
   }, [refresh, intervalMs]);
 
@@ -528,5 +453,5 @@ export function useAdminActions() {
 
 // 在客户端设置环境变量
 if (typeof window !== 'undefined') {
-  (window as Window & { __NEXT_PUBLIC_POLLING_INTERVAL__?: string }).__NEXT_PUBLIC_POLLING_INTERVAL__ = process.env.NEXT_PUBLIC_POLLING_INTERVAL || '3000';
+  (window as Window & { __NEXT_PUBLIC_POLLING_INTERVAL__?: string }).__NEXT_PUBLIC_POLLING_INTERVAL__ = process.env.NEXT_PUBLIC_POLLING_INTERVAL || '2000';
 }

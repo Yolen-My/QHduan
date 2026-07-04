@@ -9,8 +9,7 @@ import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import { getGameResult, getQuestions } from "@/lib/storage";
 import { correctAnswerForLocale, isCorrectAnswerForLocale, localizedAnswerText, localizedOptionLabel, localizedTitle, localizedWord } from "@/lib/i18n/question";
-import { isBingoCorrectQuestion } from "@/lib/bingo-scoring";
-import { useCurrentPlayer, useAppState } from "@/hooks/use-game-data.optimized";
+import { useCurrentPlayer, useAppState } from "@/hooks/use-game-data";
 import type { GameKey, GameResult, Question } from "@/types";
 
 const GAME_ORDER: GameKey[] = ["bingo", "quiz", "story", "elimination"];
@@ -29,17 +28,14 @@ function ReviewBingoBlock({ result, questions }: { result: GameResult; questions
   const { locale } = useLocaleSwitch();
   const answers = result.answers as { selectedWords?: string[]; targetWords?: string[]; correctCount?: number };
   const selectedWords: string[] = answers.selectedWords || [];
-  const targetWords: string[] = (answers.targetWords && answers.targetWords.length > 0)
-    ? answers.targetWords
-    : questions
-        .filter(isBingoCorrectQuestion)
-        .map((question) => question.title);
+  const targetWords: string[] = answers.targetWords || [];
   const correctCount: number = answers.correctCount || 0;
 
   return (
     <div className="reviewBlockContent">
       <div className="reviewScoreLine">
         <span>{t("review.score")}<b>{result.score}</b> / {result.maxScore}</span>
+        <span>{t("review.correctTargets", { count: correctCount })}</span>
       </div>
 
       <div className="reviewBingoGrid">
@@ -196,7 +192,7 @@ export default function ReviewPage() {
   const router = useRouter();
   const t = useTranslations();
   const { playerId, player } = useCurrentPlayer();
-  const { state } = useAppState();
+  const { state } = useAppState(4000);
 
   useEffect(() => {
     if (playerId === null) router.push("/register");

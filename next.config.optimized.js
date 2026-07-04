@@ -1,23 +1,32 @@
-// ⚠️ 此文件已废弃，配置已合并到 next.config.js
-// 请使用 next.config.js 作为唯一配置文件。
-// 保留此文件仅作为历史参考。
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   allowedDevOrigins: ['192.168.71.33'],
+  
+  // 生产环境优化
   compress: true,
+  
+  // 图片优化
   images: {
     formats: ['image/avif', 'image/webp'],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
   },
+  
+  // 启用 SWC 压缩
   swcMinify: true,
+  
+  // 实验性功能
   experimental: {
     optimizeCss: true,
   },
+  
+  // 输出配置
   output: 'standalone',
+  
+  // 环境变量
   env: {
-    NEXT_PUBLIC_POLLING_INTERVAL: process.env.NODE_ENV === 'production' ? '3000' : '500',
+    // 根据环境动态设置轮询间隔
+    NEXT_PUBLIC_POLLING_INTERVAL: process.env.NODE_ENV === 'production' ? '2000' : '500',
   },
 };
 

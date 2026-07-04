@@ -28,9 +28,3 @@ pb_data/
 desktop.ini
 .env.production
 /pocketbase
-
-# IDE
-.idea/
-
-# Backup
-pb_migrations_backup/

@@ -9,7 +9,7 @@ import type { AppState, Game, GameKey, GameResult, Player, Question, QuizProgres
 
 let pocketBaseAvailable = false;
 let lastHealthCheckAt = 0;
-const HEALTH_CHECK_CACHE_MS = 30000;
+const HEALTH_CHECK_CACHE_MS = 5000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -386,44 +386,6 @@ export async function loadStateFromPB(): Promise<AppState> {
   }
 
   try {
-    // 优先走服务端缓存接口 /api/game-state（TTL=2s），
-    // 高并发下 200 个客户端共享 1 次 DB 查询，大幅减少 PocketBase 压力。
-    // 仅在客户端侧使用（浏览器），服务端 SSR 直查 PocketBase 即可。
-    if (isBrowser()) {
-      try {
-        const res = await fetch("/api/game-state");
-        if (res.ok) {
-          const data = await res.json();
-          const players = (data.players || []).map(mapPlayerRecord);
-          const gameResults: GameResult[] = (data.gameResults || []).map((r: any) => ({
-            id: r.id,
-            player: r.player,
-            gameKey: r.gameKey,
-            answers: r.answers,
-            score: r.score,
-            maxScore: r.maxScore,
-            completedAt: r.completedAt,
-            pendingBingoScore: mapPendingBingoScore(r),
-            quizSessionIndex: r.quizSessionIndex,
-            sectorKey: r.sectorKey || undefined,
-            sectorName: r.sectorName || undefined
-          })).map(normalizeGameResult);
-          const games: Game[] = (data.games || []).map(mapGameRecord);
-          const questions = (data.questions || []).map(mapQuestionRecord).map(normalizeQuestion);
-
-          return {
-            players,
-            gameResults,
-            games: games.length > 0 ? games : GAMES,
-            questions
-          };
-        }
-      } catch {
-        // 缓存接口失败，回退到直查 PocketBase
-      }
-    }
-
-    // 回退：直查 PocketBase（服务端 SSR 或缓存接口不可用时）
     const [players, gameResults, games, questions] = await Promise.all([
       pb.collection("players").getFullList(),
       pb.collection("game_results").getFullList({ sort: "completedAt" }),
@@ -504,12 +466,8 @@ export async function getCurrentPlayer(): Promise<Player | null> {
     const player = mapPlayerRecord(record);
     setCachedPlayer(player);
     return player;
-  } catch (error) {
-    // 查询失败时不要清除本地缓存，可能是临时网络问题
-    // 只有明确的 404（记录不存在）才清除
-    if (error && typeof error === "object" && "status" in error && (error as any).status === 404) {
-      clearCurrentPlayer();
-    }
+  } catch {
+    clearCurrentPlayer();
     return null;
   }
 }
@@ -563,14 +521,8 @@ export async function restoreCurrentPlayerFromLocal(): Promise<Player | null> {
           saveCurrentPlayer(player);
           return player;
         }
-      } catch (error) {
-        // 只有 404 才认为记录真的不存在，其他错误保留本地缓存继续尝试
-        if (error && typeof error === "object" && "status" in error && (error as any).status === 404) {
-          // 记录被删除，清除本地缓存，尝试按 phone 查找
-        } else {
-          // 网络错误等临时问题，不继续往下走（避免误清除）
-          return null;
-        }
+      } catch {
+        // 继续按 phone 查找
       }
     }
     if (phone) {
@@ -580,7 +532,7 @@ export async function restoreCurrentPlayerFromLocal(): Promise<Player | null> {
         return byPhone;
       }
     }
-    // PocketBase 可用但确实找不到该用户（playerId 404 且 phone 也找不到），清除本地缓存
+    // PocketBase 可用但找不到该用户，清除本地缓存
     clearCurrentPlayer();
     return null;
   }
@@ -795,22 +747,20 @@ export async function triggerBingoScore(): Promise<AppState> {
       const pendingResults = await pb.collection("game_results").getFullList({ 
         filter: "gameKey = 'bingo'"
       });
-
-      // 批量并发更新所有 pending Bingo 记录（原逐个 await 在高并发下极慢）
-      const pendingUpdates = pendingResults
-        .filter(r => mapPendingBingoScore(r))
-        .map(result => {
+      
+      for (const result of pendingResults) {
+        if (mapPendingBingoScore(result)) {
           const settled = gameResults.find((item) => item.id === result.id);
-          return pb.collection("game_results").update(result.id, {
+          await pb.collection("game_results").update(result.id, {
             pendingBingoScore: false,
             score: settled?.score ?? result.score,
             answers: settled?.answers ?? { ...result.answers, pendingBingoScore: false }
           });
-        });
-      await Promise.all(pendingUpdates);
+        }
+      }
 
-      // 为没提交 Bingo 的玩家并发创建空 Bingo 记录
-      const createPromises = autoCreatedBingoResults.map(async (autoResult) => {
+      // 为没提交 Bingo 的玩家自动创建空 Bingo 记录到 PocketBase
+      for (const autoResult of autoCreatedBingoResults) {
         const created = await pb.collection("game_results").create({
           player: autoResult.player,
           gameKey: autoResult.gameKey,
@@ -821,14 +771,11 @@ export async function triggerBingoScore(): Promise<AppState> {
           pendingBingoScore: false
         });
         autoResult.id = created.id;
-      });
-      await Promise.all(createPromises);
+      }
 
-      // 并发更新所有玩家分数
-      const playerUpdates = newState.players.map(player =>
-        pb.collection("players").update(player.id, buildPlayerUpdate(player))
-      );
-      await Promise.all(playerUpdates);
+      for (const player of newState.players) {
+        await pb.collection("players").update(player.id, buildPlayerUpdate(player));
+      }
 
       const list = await pb.collection("games").getFullList();
       const bingo = list.find(g => g.key === "bingo");

@@ -10,7 +10,7 @@ import GameBannerIcon from "@/components/GameBannerIcon";
 import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import ResultModal from "@/components/ResultModal";
-import { useAppState, useCurrentPlayer, useQuestions, useSubmitGameResult } from "@/hooks/use-game-data.optimized";
+import { useAppState, useCurrentPlayer, useQuestions, useSubmitGameResult } from "@/hooks/use-game-data";
 import { answerValueForLocale, isCorrectAnswerForLocale, localizedOptionLabel, localizedTitle } from "@/lib/i18n/question";
 import type { Question } from "@/types";
 
@@ -325,13 +325,13 @@ export default function QuizClient({ initialSectorIndex = null }: { initialSecto
     return (
       <QuizShell>
         <section className="quizStatusCard">
-          <p className="quizStatusMessage">{t("common.questionsLoading")}</p>
+          <p className="quizStatusMessage">{questions.loading ? t("common.questionsLoading") : t("common.questionsReloading", { error: questions.error || t("common.noQuestions") })}</p>
         </section>
       </QuizShell>
     );
   }
 
-  if (!modal.open && initialSectorIndex !== null && !stateLoading && (!activeSector || !currentQuestion || activeSector.result || !activeSector.isOpen)) {
+  if (!modal.open && initialSectorIndex !== null && !stateLoading && !questions.loading && (!activeSector || !currentQuestion || activeSector.result || !activeSector.isOpen)) {
     return (
       <QuizShell>
         <section className="quizStatusCard">

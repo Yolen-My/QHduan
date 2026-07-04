@@ -7,7 +7,7 @@ import Layout from "@/components/Layout";
 import OfficeAverageTable from "@/components/OfficeAverageTable";
 import OfficeTop3Panel from "@/components/OfficeTop3Panel";
 import RankingTable from "@/components/RankingTable";
-import { useCurrentPlayer, useRanking } from "@/hooks/use-game-data.optimized";
+import { useCurrentPlayer, useRanking } from "@/hooks/use-game-data";
 
 export default function RankingPage() {
   const t = useTranslations();
