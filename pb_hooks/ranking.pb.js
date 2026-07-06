@@ -14,34 +14,41 @@ routerAdd("GET", "/api/ranking-data", (e) => {
     const store = e.app.store();
     const now = Date.now();
 
-    const at = store.get("rankingDataAt");
+    const at = store.get("rankingDataAt") || 0;
     const body = store.get("rankingDataBody");
-    if (at && body && now - at <= TTL_MS) {
+    const refreshing = store.get("rankingDataRefreshing");
+
+    // 缓存新鲜，或者已经有别的请求在刷新——直接用现有缓存，哪怕稍微过期也远好过集体查全表。
+    if (body && (now - at <= TTL_MS || refreshing)) {
       return e.blob(200, "application/json", body);
     }
 
-    const players = e.app.findRecordsByFilter("players", "id != ''", "-totalScore", 100000, 0);
-    const mapped = [];
-    for (let i = 0; i < players.length; i++) {
-      const p = players[i];
-      // 仅输出排行榜计算/展示所需字段（comparePlayers 用 totalScore + 完成时间；分组用 office）。
-      mapped.push({
-        id: p.id,
-        name: p.getString("name"),
-        office: p.getString("office"),
-        team: p.getString("team"),
-        totalScore: p.getFloat("totalScore"),
-        finalSubmitted: p.getBool("finalSubmitted"),
-        finalCompletedAt: p.getString("finalCompletedAt"),
-        created: p.getDateTime("created").string(),
-        updated: p.getDateTime("updated").string()
-      });
-    }
+    store.set("rankingDataRefreshing", true);
+    try {
+      const players = e.app.findRecordsByFilter("players", "id != ''", "-totalScore", 100000, 0);
+      const mapped = [];
+      for (let i = 0; i < players.length; i++) {
+        const p = players[i];
+        mapped.push({
+          id: p.id,
+          name: p.getString("name"),
+          office: p.getString("office"),
+          team: p.getString("team"),
+          totalScore: p.getFloat("totalScore"),
+          finalSubmitted: p.getBool("finalSubmitted"),
+          finalCompletedAt: p.getString("finalCompletedAt"),
+          created: p.getDateTime("created").string(),
+          updated: p.getDateTime("updated").string()
+        });
+      }
 
-    const newBody = JSON.stringify({ players: mapped, cachedAt: now });
-    store.set("rankingDataAt", now);
-    store.set("rankingDataBody", newBody);
-    return e.blob(200, "application/json", newBody);
+      const newBody = JSON.stringify({ players: mapped, cachedAt: now });
+      store.set("rankingDataAt", now);
+      store.set("rankingDataBody", newBody);
+      return e.blob(200, "application/json", newBody);
+    } finally {
+      store.set("rankingDataRefreshing", false);
+    }
   } catch (err) {
     return e.json(500, { err: String(err && err.message ? err.message : err) });
   }

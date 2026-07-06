@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties, type MouseEvent } from "react";
 import type { Game, GameKey } from "@/types";
 
 export type GameStatusKey =
@@ -59,8 +60,19 @@ export default function GameCard({
   allowEnterOverride
 }: GameCardProps) {
   const t = useTranslations();
+  const router = useRouter();
+  const [entering, setEntering] = useState(false);
   const href = `/game/${game.key}`;
   const icon = GAME_ICONS[game.key];
+
+  const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (entering) return;
+    setEntering(true);
+    // 随机抖动 0-1.5s，避免管理员开局后几百人同一秒涌入游戏页面。
+    const delay = Math.random() * 1500;
+    setTimeout(() => router.push(href), delay);
+  };
 
   let statusKey: GameStatusKey;
   let canEnter: boolean;
@@ -158,7 +170,7 @@ export default function GameCard({
   }
 
   return (
-    <Link href={href} className={itemClass}>
+    <Link href={href} className={entering ? `${itemClass} lobbyGameItem--entering` : itemClass} onClick={handleClick}>
       {cardBody}
       {iconLayer}
     </Link>

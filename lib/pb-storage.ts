@@ -5,6 +5,7 @@ import { calculateBingoSelection } from "@/lib/bingo-scoring";
 import { GAME_ORDER, GAMES, PLAYER_CACHE_KEY, PLAYER_ID_KEY, PLAYER_PHONE_KEY } from "@/lib/constants";
 import { settlePendingBingoResults } from "@/lib/game-state";
 import { getOfficeAverageRanking, getOfficeTop3, getPlayerRank, getPlayerRankingContext, getTop10Ranking } from "@/lib/ranking";
+import { withRetry } from "@/lib/retry";
 import type { AppState, Game, GameKey, GameResult, Player, Question, QuizProgress, QuizSessionSnapshot } from "@/types";
 
 let pocketBaseAvailable = false;
@@ -978,18 +979,38 @@ async function persistGameResult(
     sectorName: input.sectorName
   };
 
-  const created = await pb.collection("game_results").create({
-    player: result.player,
-    gameKey: result.gameKey,
-    answers: result.answers,
-    score: result.score,
-    maxScore: result.maxScore,
-    completedAt: result.completedAt,
-    pendingBingoScore: isPending,
-    quizSessionIndex: result.quizSessionIndex ?? 0,
-    sectorKey: result.sectorKey || "",
-    sectorName: result.sectorName || ""
-  });
+  const created = await (async () => {
+    try {
+      return await withRetry(() => pb.collection("game_results").create({
+        player: result.player,
+        gameKey: result.gameKey,
+        answers: result.answers,
+        score: result.score,
+        maxScore: result.maxScore,
+        completedAt: result.completedAt,
+        pendingBingoScore: isPending,
+        quizSessionIndex: result.quizSessionIndex ?? 0,
+        sectorKey: result.sectorKey || "",
+        sectorName: result.sectorName || ""
+      }));
+    } catch (error) {
+      // 唯一索引拦住了并发重复提交：回查一次，把它当成"已提交过"正常返回，而不是报错。
+      const filterParts = [
+        pb.filter("player = {:playerId}", { playerId: input.playerId }),
+        pb.filter("gameKey = {:gameKey}", { gameKey: input.gameKey })
+      ];
+      if (input.gameKey === "quiz") {
+        filterParts.push(pb.filter("quizSessionIndex = {:idx}", { idx: input.quizSessionIndex ?? 0 }));
+      }
+      const existing = await pb.collection("game_results")
+        .getFirstListItem(filterParts.join(" && "))
+        .catch(() => null);
+      if (existing) {
+        throw new Error("该游戏已完成，不能重复提交");
+      }
+      throw error;
+    }
+  })();
   result.id = created.id;
 
   if (isPending) {
@@ -1012,7 +1033,7 @@ async function persistGameResult(
     updated: nowIso()
   };
 
-  await pb.collection("players").update(updatedPlayer.id, buildPlayerUpdate(updatedPlayer));
+  await withRetry(() => pb.collection("players").update(updatedPlayer.id, buildPlayerUpdate(updatedPlayer)));
 
   return { result, player: updatedPlayer, rank: await getRankByScore(updatedPlayer.totalScore) };
 }
@@ -1138,69 +1159,62 @@ export async function getAdminDashboardSnapshot() {
 
 export async function getLobbySnapshot(playerId: string) {
   const available = await checkPocketBase();
-  if (available) {
-    try {
-      // 旧实现为了算「我的排名」全量拉取 players（500 并发下是主要瓶颈）。
-      // 改为：只取当前玩家本人 + 用 count 查询求名次（totalScore 已建索引），不再加载全表。
-      const playerRecord = await pb.collection("players").getOne(playerId).catch(() => null);
-      const player = playerRecord ? mapPlayerRecord(playerRecord) : null;
+  if (!available) throw new Error("PocketBase 不可用，已禁用本地兜底数据");
 
-      const [aheadCount, playerResults, games] = await Promise.all([
-        player
-          ? pb.collection("players").getList(1, 1, {
-              filter: pb.filter("totalScore > {:score}", { score: player.totalScore }),
-              fields: "id"
-            })
-          : Promise.resolve({ totalItems: 0 }),
-        // player 字段已建索引，该过滤查询命中索引而非全表扫描。
-        pb.collection("game_results").getFullList({
-          filter: pb.filter("player = {:playerId}", { playerId }),
-          sort: "completedAt"
-        }),
-        pb.collection("games").getFullList({ sort: "order" })
-      ]);
+  const attempt = async () => {
+    const playerRecord = await pb.collection("players").getOne(playerId).catch(() => null);
+    const player = playerRecord ? mapPlayerRecord(playerRecord) : null;
 
-      const results: GameResult[] = playerResults.map((r) => ({
-        id: r.id,
-        player: r.player,
-        gameKey: r.gameKey,
-        answers: r.answers,
-        score: r.score,
-        maxScore: r.maxScore,
-        completedAt: r.completedAt,
-        pendingBingoScore: mapPendingBingoScore(r),
-        quizSessionIndex: r.quizSessionIndex,
-        sectorKey: r.sectorKey || undefined,
-        sectorName: r.sectorName || undefined
-      })).map(normalizeGameResult);
-      const state: AppState = {
-        players: player ? [player] : [],
-        gameResults: results,
-        games: games.map(mapGameRecord),
-        questions: []
-      };
-      return {
-        state,
-        player,
-        // 按总分计算名次：领先我的人数 + 1（同分并列取较优名次）。
-        rank: player ? aheadCount.totalItems + 1 : 0,
-        results,
-        quizProgress: buildQuizProgress(state, playerId)
-      };
-    } catch {
-      // PocketBase 查询失败时不使用本地缓存兜底，走空状态。
-    }
-  }
+    const [aheadCount, playerResults, games] = await Promise.all([
+      player
+        ? pb.collection("players").getList(1, 1, {
+            filter: pb.filter("totalScore > {:score}", { score: player.totalScore }),
+            fields: "id"
+          })
+        : Promise.resolve({ totalItems: 0 }),
+      pb.collection("game_results").getFullList({
+        filter: pb.filter("player = {:playerId}", { playerId }),
+        sort: "completedAt"
+      }),
+      pb.collection("games").getFullList({ sort: "order" })
+    ]);
 
-  const state = await loadState();
-  const player = state.players.find((item) => item.id === playerId) || null;
-  return {
-    state,
-    player,
-    rank: player ? getPlayerRank(state.players, player.id) : 0,
-    results: state.gameResults.filter((result) => result.player === playerId),
-    quizProgress: buildQuizProgress(state, playerId)
+    const results: GameResult[] = playerResults.map((r) => ({
+      id: r.id,
+      player: r.player,
+      gameKey: r.gameKey,
+      answers: r.answers,
+      score: r.score,
+      maxScore: r.maxScore,
+      completedAt: r.completedAt,
+      pendingBingoScore: mapPendingBingoScore(r),
+      quizSessionIndex: r.quizSessionIndex,
+      sectorKey: r.sectorKey || undefined,
+      sectorName: r.sectorName || undefined
+    })).map(normalizeGameResult);
+
+    const state: AppState = {
+      players: player ? [player] : [],
+      gameResults: results,
+      games: games.map(mapGameRecord),
+      questions: []
+    };
+    return {
+      state,
+      player,
+      rank: player ? aheadCount.totalItems + 1 : 0,
+      results,
+      quizProgress: buildQuizProgress(state, playerId)
+    };
   };
+
+  try {
+    return await attempt();
+  } catch {
+    // 只重试同一个精确查询一次（短退避），绝不退化到全表扫描。
+    await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 300));
+    return await attempt();
+  }
 }
 
 // 排行榜：players 走服务端缓存接口 /api/ranking-data（TTL=2s），games 直查。
