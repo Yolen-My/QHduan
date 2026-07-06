@@ -5,7 +5,7 @@ import { calculateBingoSelection } from "@/lib/bingo-scoring";
 import { GAME_ORDER, GAMES, PLAYER_CACHE_KEY, PLAYER_ID_KEY, PLAYER_PHONE_KEY, STATE_KEY } from "@/lib/constants";
 import { settlePendingBingoResults } from "@/lib/game-state";
 import { getOfficeAverageRanking, getOfficeTop3, getPlayerRank, getPlayerRankingContext, getTop10Ranking } from "@/lib/ranking";
-import type { AppState, GameKey, GameResult, Player, Question, QuizProgress, QuizSessionSnapshot } from "@/types";
+import type { AppState, Game, GameKey, GameResult, Player, Question, QuizProgress, QuizSessionSnapshot } from "@/types";
 
 let usePocketBase = false;
 
@@ -333,7 +333,6 @@ export function validatePhone(phone: string): boolean {
 export async function registerPlayer(input: { name: string; phone: string; office: string; team: string }): Promise<{ player: Player; reused: boolean }> {
   const available = await checkBackend();
   if (available) {
-    await pbStorage.ensureCollections();
     return await pbStorage.registerPlayer(input);
   }
 
@@ -400,25 +399,20 @@ export async function isGameOpen(gameKey: GameKey): Promise<boolean> {
   return Boolean(state.games.find((game) => game.key === gameKey)?.isOpen);
 }
 
-export async function toggleGameOpen(gameKey: GameKey): Promise<AppState> {
+export async function getAdminDashboardSnapshot() {
+  const available = await checkBackend();
+  if (available) {
+    return await pbStorage.getAdminDashboardSnapshot();
+  }
+  throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
+}
+
+export async function toggleGameOpen(gameKey: GameKey): Promise<Game> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.toggleGameOpen(gameKey);
   }
-  const state = loadStateLocal();
-  state.games = state.games.map((game) => {
-    if (game.key !== gameKey) return game;
-    const isOpen = !game.isOpen;
-    if (game.key === "bingo") {
-      if (isOpen) {
-        return { ...game, isOpen, bingoScored: false, bingoPhase: "open" as const };
-      }
-      return { ...game, isOpen };
-    }
-    return { ...game, isOpen };
-  });
-  saveStateLocal(state);
-  return state;
+  throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
 }
 
 export async function triggerBingoScore(): Promise<AppState> {
@@ -436,19 +430,12 @@ export async function triggerBingoScore(): Promise<AppState> {
   return state;
 }
 
-export async function closeBingoGame(): Promise<AppState> {
+export async function closeBingoGame(): Promise<Game> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.closeBingoGame();
   }
-  const state = loadStateLocal();
-  state.games = state.games.map((game) => (
-    game.key === "bingo"
-      ? { ...game, isOpen: false, bingoPhase: "closed" as const }
-      : game
-  ));
-  saveStateLocal(state);
-  return state;
+  throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
 }
 
 export async function advanceQuizGroup(): Promise<AppState> {
@@ -468,50 +455,20 @@ export async function advanceQuizGroup(): Promise<AppState> {
   return state;
 }
 
-export async function openQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<AppState> {
+export async function openQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<Game> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.openQuizGroup(groupIndex, gameKey);
   }
-  const maxGroupIndex = getGroupMaxIndex(gameKey);
-  if (!Number.isInteger(groupIndex) || groupIndex < 0 || groupIndex > maxGroupIndex) {
-    throw new Error(`${gameKey} group index must be between 0 and ${maxGroupIndex}`);
-  }
-  const state = loadStateLocal();
-  state.games = state.games.map((game) => (
-    game.key === gameKey
-      ? {
-          ...game,
-          isOpen: true,
-          quizOpenGroups: normalizeQuizOpenGroups([...(game.quizOpenGroups || []), groupIndex])
-        }
-      : game
-  ));
-  saveStateLocal(state);
-  return state;
+  throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
 }
 
-export async function closeQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<AppState> {
+export async function closeQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<Game> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.closeQuizGroup(groupIndex, gameKey);
   }
-  const maxGroupIndex = getGroupMaxIndex(gameKey);
-  if (!Number.isInteger(groupIndex) || groupIndex < 0 || groupIndex > maxGroupIndex) {
-    throw new Error(`${gameKey} group index must be between 0 and ${maxGroupIndex}`);
-  }
-  const state = loadStateLocal();
-  state.games = state.games.map((game) => {
-    if (game.key !== gameKey) return game;
-    const quizOpenGroups = normalizeQuizOpenGroups(game.quizOpenGroups || []).filter((index) => index !== groupIndex);
-    return {
-      ...game,
-      quizOpenGroups,
-      isOpen: quizOpenGroups.length > 0
-    };
-  });
-  saveStateLocal(state);
-  return state;
+  throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
 }
 
 export async function submitGameResult(input: {
@@ -674,6 +631,14 @@ export async function getQuizSessionSnapshot(playerId: string): Promise<QuizSess
       .filter((index): index is number => Number.isInteger(index))),
     results
   };
+}
+
+export async function getGameScreenSnapshot(playerId: string, gameKey: GameKey) {
+  const available = await checkBackend();
+  if (available) {
+    return await pbStorage.getGameScreenSnapshot(playerId, gameKey);
+  }
+  throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
 }
 
 export async function getLobbySnapshot(playerId: string) {

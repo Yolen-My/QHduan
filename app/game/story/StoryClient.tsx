@@ -13,7 +13,7 @@ import ResultModal from "@/components/ResultModal";
 import CorrectAnswerModal from "@/components/CorrectAnswerModal";
 import { calculateStoryScore } from "@/lib/scoring";
 import { getGameResult } from "@/lib/storage";
-import { useAppState, useCurrentPlayer, useQuestions, useRanking, useSubmitGameResult } from "@/hooks/use-game-data";
+import { useGameScreenState, useCurrentPlayer, useQuestions, useRanking, useSubmitGameResult } from "@/hooks/use-game-data";
 import { answerValueForLocale, isCorrectAnswerForLocale, localizedOptionLabel, localizedTitle } from "@/lib/i18n/question";
 import type { Question } from "@/types";
 
@@ -107,7 +107,7 @@ export default function StoryClient({ initialGroupIndex = null }: { initialGroup
   const t = useTranslations();
   const { locale } = useLocaleSwitch();
   const { playerId, refresh: refreshPlayer, player } = useCurrentPlayer();
-  const { state, refresh: refreshState, loading: stateLoading } = useAppState();
+  const { snapshot, refresh: refreshState, loading: stateLoading } = useGameScreenState(playerId, "story");
   const { ranking } = useRanking(playerId);
   const questions = useQuestions("story");
   const submitGameResult = useSubmitGameResult();
@@ -129,7 +129,7 @@ export default function StoryClient({ initialGroupIndex = null }: { initialGroup
   const timeUpSubmittingRef = useRef(false);
   const handleTimeUpRef = useRef<() => Promise<void>>(async () => {});
 
-  const storyGame = state.games.find((game) => game.key === "story");
+  const storyGame = snapshot?.game;
   const openGroups = storyGame?.quizOpenGroups || [];
   const storyIsOpen = Boolean(storyGame?.isOpen);
 

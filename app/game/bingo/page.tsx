@@ -11,11 +11,10 @@ import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import ResultModal from "@/components/ResultModal";
 import WaitingModal from "@/components/WaitingModal";
-import { getPlayerRank } from "@/lib/ranking";
 import { calculateBingoSelection, getBingoTargetWords } from "@/lib/bingo-scoring";
 import { localizedWord } from "@/lib/i18n/question";
 import { getGameResult } from "@/lib/storage";
-import { useCurrentPlayer, useQuestions, useSubmitGameResult, useAppState } from "@/hooks/use-game-data";
+import { useCurrentPlayer, useQuestions, useSubmitGameResult, useGameScreenState } from "@/hooks/use-game-data";
 import type { Question } from "@/types";
 import type { ReactNode } from "react";
 
@@ -107,7 +106,7 @@ export default function BingoPage() {
   const t = useTranslations();
   const { locale } = useLocaleSwitch();
   const { player, playerId, refresh } = useCurrentPlayer();
-  const { state } = useAppState();
+  const { snapshot } = useGameScreenState(playerId, "bingo");
   const questions = useQuestions("bingo");
   const submitGameResult = useSubmitGameResult();
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
@@ -137,19 +136,16 @@ export default function BingoPage() {
   const timeoutKey = getBingoTimeoutKey(playerId);
 
   // Bingo 阶段
-  const bingoGame = useMemo(() => state.games.find((g) => g.key === "bingo"), [state.games]);
+  const bingoGame = snapshot?.game;
   const bingoPhase = bingoGame?.bingoPhase || "open";
-  const currentPlayer = useMemo(
-    () => (playerId ? state.players.find((p) => p.id === playerId) || player : null),
-    [playerId, state.players, player]
-  );
+  const currentPlayer = snapshot?.player || player;
 
   // 用户当前的 Bingo 状态
   const myBingoResult = useMemo(() => {
     if (!playerId) return existing;
-    const stateResult = state.gameResults.find((r) => r.player === playerId && r.gameKey === "bingo") || null;
+    const stateResult = snapshot?.myResults.find((r) => r.gameKey === "bingo") || null;
     return stateResult || existing;
-  }, [existing, playerId, state.gameResults]);
+  }, [existing, playerId, snapshot]);
 
   // 用户是否已完成 Bingo（只看用户自己的 completedGames）
   const hasCompletedBingo = Boolean(currentPlayer?.completedGames.includes("bingo"));
@@ -236,7 +232,7 @@ export default function BingoPage() {
   // 倒计时：时间到后禁止选词，自动提交（必须在 early return 之前）
   const handleSubmitRef = useRef<(autoSubmit?: boolean) => Promise<void>>(async () => {});
   useEffect(() => {
-    const bingoGame = state.games.find((g) => g.key === "bingo");
+    const bingoGame = snapshot?.game;
     const phase = bingoGame?.bingoPhase || "open";
     const completed = currentPlayer?.completedGames?.includes("bingo");
     const waiting = Boolean(myBingoResult?.pendingBingoScore) && !completed;
@@ -262,7 +258,7 @@ export default function BingoPage() {
     }
     const timer = window.setInterval(() => setSeconds((v) => Math.max(0, v - 1)), 1000);
     return () => window.clearInterval(timer);
-  }, [playerId, timeUp, seconds, state.games, currentPlayer, myBingoResult, timerKey, timeoutKey]);
+  }, [playerId, timeUp, seconds, snapshot, currentPlayer, myBingoResult, timerKey, timeoutKey]);
 
   const targetWords = useMemo(() => getBingoTargetWords(questions), [questions]);
   const selectedQuestionIdsForScore = useMemo(() => selectedQuestionIds, [selectedQuestionIds]);
@@ -283,9 +279,9 @@ export default function BingoPage() {
       open: true,
       score: latestResult.score,
       total: currentPlayer.totalScore,
-      rank: getPlayerRank(state.players, currentPlayer.id)
+      rank: snapshot?.rank || 0
     });
-  }, [hasCompletedBingo, myBingoResult, pendingResult, currentPlayer, modal.open, state.players]);
+  }, [hasCompletedBingo, myBingoResult, pendingResult, currentPlayer, modal.open, snapshot]);
 
   // 重新进入页面：若倒计时已结束且未完成/未等待判分，自动提交并弹出等待弹窗
   useEffect(() => {

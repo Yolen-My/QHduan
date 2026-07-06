@@ -10,7 +10,7 @@ import GameBannerIcon from "@/components/GameBannerIcon";
 import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import ResultModal from "@/components/ResultModal";
-import { useAppState, useCurrentPlayer, useQuestions, useSubmitGameResult } from "@/hooks/use-game-data";
+import { useGameScreenState, useCurrentPlayer, useQuestions, useSubmitGameResult } from "@/hooks/use-game-data";
 import { answerValueForLocale, isCorrectAnswerForLocale, localizedOptionLabel, localizedTitle } from "@/lib/i18n/question";
 import type { Question } from "@/types";
 
@@ -108,7 +108,7 @@ export default function QuizClient({ initialSectorIndex = null }: { initialSecto
   const t = useTranslations();
   const { locale } = useLocaleSwitch();
   const { playerId, refresh: refreshPlayer } = useCurrentPlayer();
-  const { state, refresh: refreshState, loading: stateLoading } = useAppState();
+  const { snapshot, refresh: refreshState, loading: stateLoading } = useGameScreenState(playerId, "quiz");
   const questions = useQuestions("quiz");
   const submitGameResult = useSubmitGameResult();
 
@@ -129,12 +129,12 @@ export default function QuizClient({ initialSectorIndex = null }: { initialSecto
 
   const submittingRef = useRef(false);
 
-  const quizGame = state.games.find((game) => game.key === "quiz");
+  const quizGame = snapshot?.game;
   const quizIsOpen = Boolean(quizGame?.isOpen);
   const quizOpenGroups = quizGame?.quizOpenGroups || [];
   const playerQuizResults = useMemo(() => (
-    state.gameResults.filter((result) => result.player === playerId && result.gameKey === "quiz")
-  ), [playerId, state.gameResults]);
+    snapshot?.myResults.filter((result) => result.gameKey === "quiz") || []
+  ), [snapshot]);
 
   const quizSectors = useMemo(() => {
     const activeQuestions = questions

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Layout from "@/components/Layout";
 import { GAME_ORDER, GAME_DISPLAY_NAMES } from "@/lib/constants";
 import { loadState, resetDemoData } from "@/lib/storage";
-import { useAdminActions, useAppState } from "@/hooks/use-game-data";
+import { useAdminActions, useAdminDashboard } from "@/hooks/use-game-data";
 import type { GameKey } from "@/types";
 
 const QUIZ_SECTOR_COUNT = 5;
@@ -28,7 +28,7 @@ function getGroupName(index: number): string {
 }
 
 export default function AdminControlPage() {
-  const { state, refresh } = useAppState(2000);
+  const { snapshot, questions, refresh } = useAdminDashboard();
   const {
     toggleGameOpen,
     triggerBingoScore,
@@ -38,27 +38,29 @@ export default function AdminControlPage() {
   } = useAdminActions();
   const [exportText, setExportText] = useState("");
 
+  const gameResults = snapshot?.gameResults || [];
   const completion = useMemo(() => {
     return GAME_ORDER.map((key) => ({
       key,
-      count: state.gameResults.filter((result) => result.gameKey === key).length
+      count: gameResults.filter((result) => result.gameKey === key).length
     }));
-  }, [state.gameResults]);
+  }, [gameResults]);
 
-  const bingoGame = state.games.find((game) => game.key === "bingo");
+  const games = snapshot?.games || [];
+  const bingoGame = games.find((game) => game.key === "bingo");
   const bingoPhase = bingoGame?.bingoPhase || "open";
   const bingoCompletionCount = completion.find((item) => item.key === "bingo")?.count || 0;
-  const pendingBingoCount = state.gameResults.filter((result) => result.gameKey === "bingo" && result.pendingBingoScore).length;
+  const pendingBingoCount = gameResults.filter((result) => result.gameKey === "bingo" && result.pendingBingoScore).length;
 
-  const quizGame = state.games.find((game) => game.key === "quiz");
+  const quizGame = games.find((game) => game.key === "quiz");
   const quizOpenGroups = quizGame?.quizOpenGroups || [];
-  const eliminationGame = state.games.find((game) => game.key === "elimination");
+  const eliminationGame = games.find((game) => game.key === "elimination");
   const eliminationOpenMissions = eliminationGame?.quizOpenGroups || [];
-  const storyGame = state.games.find((game) => game.key === "story");
+  const storyGame = games.find((game) => game.key === "story");
   const storyOpenGroups = storyGame?.quizOpenGroups || [];
 
   const quizSectors = useMemo(() => {
-    const activeQuizQuestions = state.questions
+    const activeQuizQuestions = questions
       .filter((question) => question.gameKey === "quiz" && question.isActive === true)
       .map((question) => ({
         ...question,
@@ -68,11 +70,11 @@ export default function AdminControlPage() {
       }));
 
     return Array.from({ length: QUIZ_SECTOR_COUNT }, (_, index) => {
-      const questions = activeQuizQuestions
+      const sectorQuestions = activeQuizQuestions
         .filter((question) => question.quizSessionIndex === index)
         .sort((a, b) => a.order - b.order);
       const completedPlayers = new Set(
-        state.gameResults
+        gameResults
           .filter((result) => (
             result.gameKey === "quiz" &&
             (Number.isInteger(result.quizSessionIndex) ? result.quizSessionIndex : 0) === index
@@ -82,21 +84,21 @@ export default function AdminControlPage() {
 
       return {
         index,
-        sectorName: getSectorName(index, questions),
-        questions,
+        sectorName: getSectorName(index, sectorQuestions),
+        questions: sectorQuestions,
         isOpen: quizOpenGroups.includes(index),
         completedCount: completedPlayers.size
       };
     });
-  }, [quizOpenGroups, state.gameResults, state.questions]);
+  }, [quizOpenGroups, gameResults, questions]);
 
   const eliminationMissions = useMemo(() => {
-    const activeQuestions = state.questions
+    const activeQuestions = questions
       .filter((question) => question.gameKey === "elimination" && question.isActive === true)
       .sort((a, b) => a.order - b.order)
       .slice(0, ELIMINATION_MISSION_COUNT);
     const completedPlayers = new Set(
-      state.gameResults
+      gameResults
         .filter((result) => result.gameKey === "elimination")
         .map((result) => result.player)
     );
@@ -108,15 +110,15 @@ export default function AdminControlPage() {
       isOpen: eliminationOpenMissions.includes(index),
       completedCount: completedPlayers.size
     }));
-  }, [eliminationOpenMissions, state.gameResults, state.questions]);
+  }, [eliminationOpenMissions, gameResults, questions]);
 
   const storyGroups = useMemo(() => {
-    const activeQuestions = state.questions
+    const activeQuestions = questions
       .filter((question) => question.gameKey === "story" && question.isActive === true)
       .sort((a, b) => a.order - b.order)
       .slice(0, STORY_GROUP_COUNT);
     const completedPlayers = new Set(
-      state.gameResults
+      gameResults
         .filter((result) => result.gameKey === "story")
         .map((result) => result.player)
     );
@@ -128,16 +130,15 @@ export default function AdminControlPage() {
       isOpen: storyOpenGroups.includes(index),
       completedCount: completedPlayers.size
     }));
-  }, [storyOpenGroups, state.gameResults, state.questions]);
+  }, [storyOpenGroups, gameResults, questions]);
 
   async function refreshOnce() {
     await refresh();
   }
 
   async function handleToggle(key: GameKey) {
-    const nextState = await toggleGameOpen(key);
-    const game = nextState.games.find((item) => item.key === key);
-    setExportText(`${GAME_DISPLAY_NAMES[key]} 已${game?.isOpen ? "开启" : "关闭"}`);
+    const game = await toggleGameOpen(key);
+    setExportText(`${GAME_DISPLAY_NAMES[key]} 已${game.isOpen ? "开启" : "关闭"}`);
     await refreshOnce();
   }
 
@@ -237,22 +238,22 @@ export default function AdminControlPage() {
       <section className="scoreGrid">
         <div>
           <span>参与人数</span>
-          <b>{state.players.length}</b>
+          <b>{snapshot?.playerCount || 0}</b>
         </div>
         <div>
           <span>结果记录</span>
-          <b>{state.gameResults.length}</b>
+          <b>{gameResults.length}</b>
         </div>
         <div>
           <span>已完成</span>
-          <b>{state.players.filter((player) => player.finalSubmitted).length}</b>
+          <b>{snapshot?.finalizedPlayerCount || 0}</b>
         </div>
       </section>
 
       <section className="sectionBlock">
         <h2>游戏开关</h2>
         <div className="adminList">
-          {[...state.games].sort((a, b) => a.order - b.order).map((game) => (
+          {[...games].sort((a, b) => a.order - b.order).map((game) => (
             <div className="adminRow" key={game.key}>
               <div>
                 <b>{GAME_DISPLAY_NAMES[game.key as GameKey]}</b>

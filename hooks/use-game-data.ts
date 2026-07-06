@@ -9,6 +9,8 @@ import {
   getInitialState,
   getLobbySnapshot,
   getQuestions,
+  getGameScreenSnapshot,
+  getAdminDashboardSnapshot,
   getRankingSnapshot,
   isGameOpen,
   loadState,
@@ -47,6 +49,39 @@ export function useAppState(intervalMs?: number) {
   }, [refresh, intervalMs]);
 
   return { state, refresh, loading };
+}
+
+export function useGameScreenState(playerId: string | null | undefined, gameKey: GameKey) {
+  const [snapshot, setSnapshot] = useState<Awaited<ReturnType<typeof getGameScreenSnapshot>> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!playerId) {
+      setSnapshot(null);
+      setLoading(false);
+      return;
+    }
+    try {
+      const s = await getGameScreenSnapshot(playerId, gameKey);
+      setSnapshot(s);
+    } catch (error) {
+      console.error(`❌ useGameScreenState(${gameKey}) 加载失败:`, error);
+    } finally {
+      setLoading(false);
+    }
+  }, [playerId, gameKey]);
+
+  useEffect(() => {
+    refresh();
+    const unsubscribe = subscribeToState(refresh);
+    const timer = window.setInterval(refresh, STATE_REFRESH_INTERVAL_MS);
+    return () => {
+      unsubscribe();
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
+
+  return { snapshot, refresh, loading };
 }
 
 export function useCurrentPlayer() {
@@ -282,4 +317,46 @@ export function useRanking(playerId?: string | null, intervalMs?: number) {
 
 export function useAdminActions() {
   return { toggleGameOpen, triggerBingoScore, closeBingoGame, advanceQuizGroup, openQuizGroup, closeQuizGroup };
+}
+
+// 管理员仪表盘专用：snapshot 每 2s 轮询（players 只取计数、game_results 裁剪字段），
+// questions 只在挂载时拉一次（题库在活动期间不变）。
+export function useAdminDashboard() {
+  const [snapshot, setSnapshot] = useState<Awaited<ReturnType<typeof getAdminDashboardSnapshot>> | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const s = await getAdminDashboardSnapshot();
+      setSnapshot(s);
+    } catch (error) {
+      console.error("❌ useAdminDashboard 加载失败:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // questions 只在挂载时加载一次，不跟 2s 轮询
+  useEffect(() => {
+    Promise.all([
+      getQuestions("quiz"),
+      getQuestions("elimination"),
+      getQuestions("story")
+    ]).then(([q, e, s]) => {
+      setQuestions([...q, ...e, ...s]);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const unsubscribe = subscribeToState(refresh);
+    const timer = window.setInterval(refresh, 2000);
+    return () => {
+      unsubscribe();
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
+
+  return { snapshot, questions, refresh, loading };
 }

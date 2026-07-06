@@ -8,9 +8,10 @@ type CorrectAnswerModalProps = {
   isCorrect: boolean;
   isTimeout?: boolean;
   onNext: () => void;
+  buttonText?: string;
 };
 
-export default function CorrectAnswerModal({ open, isCorrect, isTimeout = false, onNext }: CorrectAnswerModalProps) {
+export default function CorrectAnswerModal({ open, isCorrect, isTimeout = false, onNext, buttonText }: CorrectAnswerModalProps) {
   const t = useTranslations();
   if (!open) return null;
 
@@ -62,7 +63,7 @@ export default function CorrectAnswerModal({ open, isCorrect, isTimeout = false,
             type="button"
             onClick={onNext}
           >
-            {t("common.nextQuestion")}
+            {buttonText || t("common.nextQuestion")}
           </button>
         </div>
       </section>

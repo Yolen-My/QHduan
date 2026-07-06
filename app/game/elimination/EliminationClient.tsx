@@ -13,7 +13,7 @@ import ResultModal from "@/components/ResultModal";
 import CorrectAnswerModal from "@/components/CorrectAnswerModal";
 import { calculateEliminationScore } from "@/lib/scoring";
 import { getGameResult } from "@/lib/storage";
-import { useAppState, useCurrentPlayer, useQuestions, useRanking, useSubmitGameResult } from "@/hooks/use-game-data";
+import { useGameScreenState, useCurrentPlayer, useQuestions, useRanking, useSubmitGameResult } from "@/hooks/use-game-data";
 import { answerValueForLocale, isCorrectAnswerForLocale, localizedOptionLabel, localizedTitle } from "@/lib/i18n/question";
 import type { Question } from "@/types";
 
@@ -107,7 +107,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
   const t = useTranslations();
   const { locale } = useLocaleSwitch();
   const { playerId, refresh: refreshPlayer, player } = useCurrentPlayer();
-  const { state, refresh: refreshState, loading: stateLoading } = useAppState();
+  const { snapshot, refresh: refreshState, loading: stateLoading } = useGameScreenState(playerId, "elimination");
   const { ranking } = useRanking(playerId);
   const questions = useQuestions("elimination");
   const submitGameResult = useSubmitGameResult();
@@ -119,6 +119,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
   const [correctModalOpen, setCorrectModalOpen] = useState(false);
   const [correctModalIsCorrect, setCorrectModalIsCorrect] = useState(true);
   const [correctModalIsTimeout, setCorrectModalIsTimeout] = useState(false);
+  const [correctModalIsLastMission, setCorrectModalIsLastMission] = useState(false);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
@@ -129,7 +130,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
   const timeUpSubmittingRef = useRef(false);
   const handleTimeUpRef = useRef<() => Promise<void>>(async () => {});
 
-  const eliminationGame = state.games.find((game) => game.key === "elimination");
+  const eliminationGame = snapshot?.game;
   const openMissions = eliminationGame?.quizOpenGroups || [];
   const eliminationIsOpen = Boolean(eliminationGame?.isOpen);
 
@@ -258,6 +259,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
       setExisting(outcome.result);
       setModal({ open: true, score: outcome.result.score, total: outcome.player.totalScore, rank: outcome.rank });
     } catch (error) {
+      console.error("❌ submitFinal 失败:", error);
       const errorMessage = error instanceof Error ? error.message : t("common.submitFailed");
       if (errorMessage.includes("已完成") && playerId) {
         const completedResult = await getGameResult(playerId, "elimination");
@@ -291,24 +293,22 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
 
     const completedAll = gameQuestions.length >= ELIMINATION_MISSION_COUNT && gameQuestions.every((question) => hasAnswer(nextAnswers, question));
     
-    if (activeMission.index < 7) {
+    if (activeMission.index < 8) {
       const correct = isCorrectAnswer(currentQuestion, answer, locale);
       setCorrectModalIsCorrect(correct);
       setCorrectModalIsTimeout(false);
+      setCorrectModalIsLastMission(activeMission.index === 7);
       setCorrectModalOpen(true);
       return;
     }
 
-    if (completedAll) {
-      await submitFinal(nextAnswers);
-      return;
-    }
     setIsLeaving(true);
     router.replace("/game/elimination");
   }
 
   function handleCorrectModalNext() {
     setCorrectModalOpen(false);
+    setCorrectModalIsLastMission(false);
     setIsLeaving(true);
     router.replace("/game/elimination");
   }
@@ -317,9 +317,10 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
     if (!currentQuestion || !activeMission || existing || modal.open || timeUpSubmittingRef.current || submitting) return;
     timeUpSubmittingRef.current = true;
     setTimeUp(true);
-    if (activeMission.index < 7) {
+    if (activeMission.index < 8) {
       setCorrectModalIsCorrect(false);
       setCorrectModalIsTimeout(true);
+      setCorrectModalIsLastMission(activeMission.index === 7);
       setCorrectModalOpen(true);
       const nextAnswers = { ...answers, [currentQuestion.id]: "" };
       persistAnswers(nextAnswers);
@@ -492,6 +493,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
           isCorrect={correctModalIsCorrect}
           isTimeout={correctModalIsTimeout}
           onNext={handleCorrectModalNext}
+          buttonText={correctModalIsLastMission ? t("elimination.backToMissions") : undefined}
         />
       </EliminationShell>
     );
@@ -562,6 +564,10 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
         <button className="quizBackButton" disabled={submitting} type="button" onClick={() => submitFinal(answers)}>
           {submitting ? t("common.submitting") : t("common.submitFinal")}
         </button>
+      )}
+
+      {message && !modal.open && (
+        <p className="quizStatusMessage" style={{ color: "var(--danger, #ff6b6b)", padding: "8px 16px" }}>{message}</p>
       )}
 
       <button className="quizBackButton" type="button" onClick={goLobby}>
