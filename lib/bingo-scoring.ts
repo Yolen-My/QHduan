@@ -6,7 +6,16 @@ function asStringArray(value: unknown): string[] {
 }
 
 export function isBingoCorrectQuestion(question: Question): boolean {
-  return question.gameKey === "bingo" && typeof question.correctAnswer === "string" && question.correctAnswer === question.title;
+  if (question.gameKey !== "bingo") return false;
+  const ca = typeof question.correctAnswer === "string" ? question.correctAnswer.trim() : "";
+  const title = question.title?.trim() || "";
+  if (ca && ca === title) return true;
+  const caEn = question.correctAnswerEn
+    ? (typeof question.correctAnswerEn === "string" ? question.correctAnswerEn : String(question.correctAnswerEn)).trim()
+    : "";
+  const titleEn = question.titleEn?.trim() || "";
+  if (caEn && caEn === titleEn) return true;
+  return false;
 }
 
 export function getBingoTargetWords(questions: Question[]): string[] {

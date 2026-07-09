@@ -471,15 +471,15 @@ export default function BingoPage() {
         <div className="bingoGridWrap">
           <div className="bingoGrid">
             {Array.from({ length: 9 }).map((_, index) => (
-              <div className={selectedWords[index] ? "lit" : ""} key={index}>
+              <div className={selectedDisplayWords[index] ? "lit" : ""} key={index}>
                 <span
                   style={
-                    selectedWords[index]
-                      ? { fontSize: `${getGridFontSize(selectedWords[index])}px` }
+                    selectedDisplayWords[index]
+                      ? { fontSize: `${getGridFontSize(selectedDisplayWords[index])}px` }
                       : undefined
                   }
                 >
-                  {selectedWords[index] || ""}
+                  {selectedDisplayWords[index] || ""}
                 </span>
               </div>
             ))}
