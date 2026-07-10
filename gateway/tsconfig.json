@@ -6,7 +6,12 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["../*"]
+    },
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0"
   },
   "include": ["./**/*.ts", "../lib/ranking.ts", "../types/index.ts"]
 }
