@@ -949,61 +949,46 @@ export async function submitGameResult(input: {
   sectorName?: string;
   eliminated?: boolean;
 }): Promise<{ result: GameResult; player: Player; rank: number }> {
-  const state = await loadState();
-  const game = state.games.find((g) => g.key === input.gameKey);
-  const player = state.players.find((p) => p.id === input.playerId);
+  const available = await checkPocketBase();
+  if (!available) throw new Error("PocketBase 不可用，已禁用本地兜底数据，请稍后重试");
 
-  if (!player) throw new Error("未找到当前用户，请重新注册");
+  // 精确读取:目标游戏 1 行 + 玩家 1 行 + 该玩家全部成绩(player 已建索引,≤10 行)
+  const [gameRecord, playerRecord, myResultRecords] = await Promise.all([
+    pb.collection("games").getFirstListItem(pb.filter("key = {:key}", { key: input.gameKey })).catch(() => null),
+    pb.collection("players").getOne(input.playerId).catch(() => null),
+    pb.collection("game_results").getFullList({
+      filter: pb.filter("player = {:playerId}", { playerId: input.playerId })
+    })
+  ]);
+  if (!playerRecord) throw new Error("未找到当前用户，请重新注册");
+  const game = gameRecord ? mapGameRecord(gameRecord) : null;
+  const player = mapPlayerRecord(playerRecord);
+  const myResults = myResultRecords.map(mapResultRecord);
+  const sameGameResults = myResults.filter((r) => r.gameKey === input.gameKey);
 
-  // === Bingo 特殊逻辑：根据 bingoPhase 决定提交行为 ===
   if (input.gameKey === "bingo") {
     const bingoPhase = game?.bingoPhase || "open";
-
-    // 1. 已完成则禁止重复提交
-    if (player.completedGames.includes("bingo")) {
-      throw new Error("该游戏已完成，不能重复提交");
-    }
-    // 已有非 pending 的 bingo 记录也算完成
-    const existingBingoResult = state.gameResults.find(
-      (r) => r.player === input.playerId && r.gameKey === "bingo"
-    );
-    if (existingBingoResult && !existingBingoResult.pendingBingoScore) {
-      throw new Error("该游戏已完成，不能重复提交");
-    }
-    // 已存在 pending 记录不允许重复提交
-    if (existingBingoResult && existingBingoResult.pendingBingoScore) {
-      throw new Error("已提交，等待 Boss 发言完成后判分");
-    }
-
-    // 2. closed 阶段禁止提交
-    if (bingoPhase === "closed") {
-      throw new Error("Bingo 已结束");
-    }
-
-    // 3. open 阶段：标记 pending，等待 Boss 判分
-    // 4. auto_score 阶段：立即判分
+    if (player.completedGames.includes("bingo")) throw new Error("该游戏已完成，不能重复提交");
+    const existingBingoResult = sameGameResults[0] || null;
+    if (existingBingoResult && !existingBingoResult.pendingBingoScore) throw new Error("该游戏已完成，不能重复提交");
+    if (existingBingoResult && existingBingoResult.pendingBingoScore) throw new Error("已提交，等待 Boss 发言完成后判分");
+    if (bingoPhase === "closed") throw new Error("Bingo 已结束");
     const isPending = bingoPhase === "open";
-    return await persistGameResult(state, input, isPending);
+    return await persistGameResult(player, myResults, input, isPending);
   }
 
   if (input.gameKey === "quiz") {
     const quizSessionIndex = Number.isInteger(input.quizSessionIndex) ? input.quizSessionIndex as number : 0;
-    if (quizSessionIndex < 0 || quizSessionIndex > 4) {
-      throw new Error("Quiz group index must be between 0 and 4");
-    }
+    if (quizSessionIndex < 0 || quizSessionIndex > 4) throw new Error("Quiz group index must be between 0 and 4");
     const openGroups = normalizeQuizOpenGroups(game?.quizOpenGroups || []);
-    if (!game?.isOpen || !openGroups.includes(quizSessionIndex)) {
-      throw new Error("该游戏暂未开放");
-    }
-    if (state.gameResults.some((result) => (
-      result.player === input.playerId &&
-      result.gameKey === "quiz" &&
+    if (!game?.isOpen || !openGroups.includes(quizSessionIndex)) throw new Error("该游戏暂未开放");
+    if (sameGameResults.some((result) =>
       (Number.isInteger(result.quizSessionIndex) ? result.quizSessionIndex : 0) === quizSessionIndex
-    ))) {
+    )) {
       throw new Error("该组 Quiz 已完成，不能重复提交");
     }
     const defaults = getQuizSectorDefaults(quizSessionIndex);
-    return await persistGameResult(state, {
+    return await persistGameResult(player, myResults, {
       ...input,
       quizSessionIndex,
       sectorKey: input.sectorKey || defaults.sectorKey,
@@ -1011,20 +996,14 @@ export async function submitGameResult(input: {
     }, false);
   }
 
-  // === 其他游戏：必须 isOpen=true ===
-  if (!game?.isOpen) {
-    throw new Error("该游戏暂未开放");
-  }
-
-  if (state.gameResults.some((result) => result.player === input.playerId && result.gameKey === input.gameKey)) {
-    throw new Error("该游戏已完成，不能重复提交");
-  }
-
-  return await persistGameResult(state, input, false);
+  if (!game?.isOpen) throw new Error("该游戏暂未开放");
+  if (sameGameResults.length > 0) throw new Error("该游戏已完成，不能重复提交");
+  return await persistGameResult(player, myResults, input, false);
 }
 
 async function persistGameResult(
-  state: AppState,
+  player: Player,
+  myResults: GameResult[],
   input: {
     playerId: string;
     gameKey: GameKey;
@@ -1038,11 +1017,9 @@ async function persistGameResult(
   },
   isPending: boolean
 ): Promise<{ result: GameResult; player: Player; rank: number }> {
-  const playerIndex = state.players.findIndex((player) => player.id === input.playerId);
-  if (playerIndex < 0) throw new Error("未找到当前用户，请重新注册");
-
+  // Bingo 判分需要题库(精确查询,仅 bingo 题)
   const bingoScore = input.gameKey === "bingo"
-    ? calculateBingoSelection(state.questions, input.answers, input.score)
+    ? calculateBingoSelection(await getQuestions("bingo"), input.answers, input.score)
     : null;
   const maxScore = input.gameKey === "elimination" ? 200 : 100;
 
@@ -1051,12 +1028,7 @@ async function persistGameResult(
     player: input.playerId,
     gameKey: input.gameKey,
     answers: bingoScore
-      ? {
-          ...input.answers,
-          selectedWords: bingoScore.selectedWords,
-          targetWords: bingoScore.targetWords,
-          correctCount: bingoScore.correctCount
-        }
+      ? { ...input.answers, selectedWords: bingoScore.selectedWords, targetWords: bingoScore.targetWords, correctCount: bingoScore.correctCount }
       : input.answers,
     score: Math.max(0, Math.min(maxScore, Math.round(bingoScore?.score ?? input.score))),
     maxScore,
@@ -1067,62 +1039,50 @@ async function persistGameResult(
     sectorName: input.sectorName
   };
 
-  const available = await checkPocketBase();
-  if (!available) throw new Error("PocketBase 不可用，已禁用本地兜底数据");
-
   const created = await pb.collection("game_results").create({
-      player: result.player,
-      gameKey: result.gameKey,
-      answers: result.answers,
-      score: result.score,
-      maxScore: result.maxScore,
-      completedAt: result.completedAt,
-      pendingBingoScore: isPending,
-      quizSessionIndex: result.quizSessionIndex,
-      sectorKey: result.sectorKey,
-      sectorName: result.sectorName
-    });
+    player: result.player,
+    gameKey: result.gameKey,
+    answers: result.answers,
+    score: result.score,
+    maxScore: result.maxScore,
+    completedAt: result.completedAt,
+    pendingBingoScore: isPending,
+    quizSessionIndex: result.quizSessionIndex,
+    sectorKey: result.sectorKey,
+    sectorName: result.sectorName
+  });
   result.id = created.id;
 
-  // pending 情况下不更新 player.completedGames
   if (isPending) {
-    const newState: AppState = {
-      ...state,
-      gameResults: [...state.gameResults, result]
-    };
-    await saveState(newState);
-    return { result, player: state.players[playerIndex], rank: getPlayerRank(state.players, input.playerId) };
+    await saveState(getEmptyRuntimeState());
+    return { result, player, rank: 0 };
   }
 
-  // 已判分：更新 player
-  const gameResults = [...state.gameResults, result];
-  const totalScore = gameResults
-    .filter((item) => item.player === input.playerId && !item.pendingBingoScore)
-    .reduce((sum, item) => sum + item.score, 0);
-  const playerResults = gameResults.filter((item) => item.player === input.playerId && !item.pendingBingoScore);
-  const completedGames = getCompletedGamesForPlayer(state.players[playerIndex], playerResults, input.gameKey);
-  // 站立淘汰被淘汰：视为整场比赛结束，标记最终完成
+  // 已判分:基于「我的成绩」重算 player(无需全表)
+  const settledResults = [...myResults.filter((r) => !r.pendingBingoScore), result];
+  const totalScore = settledResults.reduce((sum, item) => sum + item.score, 0);
+  const completedGames = getCompletedGamesForPlayer(player, settledResults, input.gameKey);
   const isEliminatedFinal = input.gameKey === "elimination" && Boolean(input.eliminated);
   const finalSubmitted = isEliminatedFinal || GAME_ORDER.every((key) => completedGames.includes(key));
-  const player: Player = {
-    ...state.players[playerIndex],
+  const updatedPlayer: Player = {
+    ...player,
     totalScore,
     completedGames,
     finalSubmitted,
-    finalCompletedAt: finalSubmitted ? (state.players[playerIndex].finalCompletedAt || nowIso()) : state.players[playerIndex].finalCompletedAt,
+    finalCompletedAt: finalSubmitted ? (player.finalCompletedAt || nowIso()) : player.finalCompletedAt,
     updated: nowIso()
   };
 
-  await pb.collection("players").update(player.id, buildPlayerUpdate(player));
+  await pb.collection("players").update(updatedPlayer.id, buildPlayerUpdate(updatedPlayer));
 
-  const newState: AppState = {
-    ...state,
-    players: state.players.map((p, i) => i === playerIndex ? player : p),
-    gameResults
-  };
-  await saveState(newState);
+  // 名次:count 查询(totalScore 已建索引),不再全表排序
+  const ahead = await pb.collection("players").getList(1, 1, {
+    filter: pb.filter("totalScore > {:score}", { score: totalScore }),
+    fields: "id"
+  }).catch(() => ({ totalItems: 0 } as { totalItems: number }));
 
-  return { result, player, rank: getPlayerRank(newState.players, player.id) };
+  await saveState(getEmptyRuntimeState());
+  return { result, player: updatedPlayer, rank: ahead.totalItems + 1 };
 }
 
 export async function getQuestions(gameKey: GameKey) {
