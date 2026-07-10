@@ -252,6 +252,22 @@ function buildPlayerUpdate(player: Player): Record<string, unknown> {
   return playerUpdate;
 }
 
+function mapResultRecord(record: any): GameResult {
+  return normalizeGameResult({
+    id: record.id,
+    player: record.player,
+    gameKey: record.gameKey,
+    answers: record.answers,
+    score: record.score,
+    maxScore: record.maxScore,
+    completedAt: record.completedAt,
+    pendingBingoScore: mapPendingBingoScore(record),
+    quizSessionIndex: record.quizSessionIndex,
+    sectorKey: record.sectorKey || undefined,
+    sectorName: record.sectorName || undefined
+  });
+}
+
 export async function checkPocketBase(): Promise<boolean> {
   const now = Date.now();
   if (now - lastHealthCheckAt < HEALTH_CHECK_CACHE_MS) {
@@ -386,19 +402,7 @@ export async function loadStateFromPB(): Promise<AppState> {
 
     const mappedPlayers: Player[] = players.map(mapPlayerRecord);
 
-    const mappedResults: GameResult[] = gameResults.map(r => ({
-      id: r.id,
-      player: r.player,
-      gameKey: r.gameKey,
-      answers: r.answers,
-      score: r.score,
-      maxScore: r.maxScore,
-      completedAt: r.completedAt,
-      pendingBingoScore: mapPendingBingoScore(r),
-      quizSessionIndex: r.quizSessionIndex,
-      sectorKey: r.sectorKey || undefined,
-      sectorName: r.sectorName || undefined
-    })).map(normalizeGameResult);
+    const mappedResults: GameResult[] = gameResults.map(mapResultRecord);
     const mappedGames: Game[] = games.map(mapGameRecord);
 
     const mappedQuestions = questions.map(normalizeQuestion);
@@ -603,13 +607,29 @@ export async function registerPlayer(input: { name: string; phone: string; offic
 }
 
 export async function getGameResult(playerId: string, gameKey: GameKey): Promise<GameResult | null> {
-  const state = await loadState();
-  return state.gameResults.find((result) => result.player === playerId && result.gameKey === gameKey) || null;
+  const available = await checkPocketBase();
+  if (!available) return null;
+  try {
+    const record = await pb.collection("game_results").getFirstListItem(
+      pb.filter("player = {:playerId} && gameKey = {:gameKey}", { playerId, gameKey })
+    );
+    return mapResultRecord(record);
+  } catch {
+    return null;
+  }
 }
 
 export async function isGameOpen(gameKey: GameKey): Promise<boolean> {
-  const state = await loadState();
-  return Boolean(state.games.find((game) => game.key === gameKey)?.isOpen);
+  const available = await checkPocketBase();
+  if (!available) return false;
+  try {
+    const record = await pb.collection("games").getFirstListItem(
+      pb.filter("key = {:key}", { key: gameKey })
+    );
+    return Boolean(record.isOpen);
+  } catch {
+    return false;
+  }
 }
 
 export async function toggleGameOpen(gameKey: GameKey): Promise<AppState> {
@@ -1124,18 +1144,26 @@ export async function getQuestions(gameKey: GameKey) {
 }
 
 export async function getQuizSessionSnapshot(playerId: string): Promise<QuizSessionSnapshot> {
-  const state = await loadState();
-  const quizGame = state.games.find((game) => game.key === "quiz");
-  const results = state.gameResults
-    .filter((result) => result.player === playerId && result.gameKey === "quiz")
-    .map(normalizeGameResult);
-  return {
-    openGroups: normalizeQuizOpenGroups(quizGame?.quizOpenGroups || []),
-    completedGroups: normalizeQuizOpenGroups(results
-      .map((result) => result.quizSessionIndex)
-      .filter((index): index is number => Number.isInteger(index))),
-    results
-  };
+  const available = await checkPocketBase();
+  if (!available) return { openGroups: [], completedGroups: [], results: [] };
+  try {
+    const [quizGame, records] = await Promise.all([
+      pb.collection("games").getFirstListItem(pb.filter("key = 'quiz'")).catch(() => null),
+      pb.collection("game_results").getFullList({
+        filter: pb.filter("player = {:playerId} && gameKey = 'quiz'", { playerId })
+      })
+    ]);
+    const results = records.map(mapResultRecord);
+    return {
+      openGroups: normalizeQuizOpenGroups(quizGame?.quizOpenGroups || []),
+      completedGroups: normalizeQuizOpenGroups(results
+        .map((result) => result.quizSessionIndex)
+        .filter((index): index is number => Number.isInteger(index))),
+      results
+    };
+  } catch {
+    return { openGroups: [], completedGroups: [], results: [] };
+  }
 }
 
 export async function getLobbySnapshot(playerId: string) {
@@ -1162,19 +1190,7 @@ export async function getLobbySnapshot(playerId: string) {
         pb.collection("games").getFullList({ sort: "order" })
       ]);
 
-      const results: GameResult[] = playerResults.map((r) => ({
-        id: r.id,
-        player: r.player,
-        gameKey: r.gameKey,
-        answers: r.answers,
-        score: r.score,
-        maxScore: r.maxScore,
-        completedAt: r.completedAt,
-        pendingBingoScore: mapPendingBingoScore(r),
-        quizSessionIndex: r.quizSessionIndex,
-        sectorKey: r.sectorKey || undefined,
-        sectorName: r.sectorName || undefined
-      })).map(normalizeGameResult);
+      const results: GameResult[] = playerResults.map(mapResultRecord);
       const state: AppState = {
         players: player ? [player] : [],
         gameResults: results,
