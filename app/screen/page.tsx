@@ -9,7 +9,7 @@ import { useRanking } from "@/hooks/use-game-data";
 
 export default function ScreenPage() {
   const t = useTranslations();
-  const { ranking, loading } = useRanking(null, 3000);
+  const { ranking, loading } = useRanking(null);
 
   return (
     <main className="screenPage">
@@ -42,7 +42,7 @@ export default function ScreenPage() {
               />
             </div>
             <p className="screenParticipantCount">
-              <strong>{loading || !ranking ? "—" : ranking.players.length || 0}</strong>
+              <strong>{loading || !ranking ? "—" : ranking.participantCount || 0}</strong>
               <span>{t("screen.participants")}</span>
             </p>
           </div>

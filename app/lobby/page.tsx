@@ -29,7 +29,7 @@ export default function LobbyPage() {
     check();
   }, [playerId, router]);
 
-  if (!player || !snapshot) {
+  if (!player || !snapshot || !snapshot.quizProgress) {
     return (
       <Layout title={t("common.lobby")} hideHeader>
         <section className="lobbyPage">
@@ -43,15 +43,15 @@ export default function LobbyPage() {
   }
 
   const completedCount = player.completedGames.length;
-  const quizProgress = snapshot.quizProgress;
+  const quizProgress = snapshot.quizProgress; // 已在上方 early-return 收窄为非 null
   const hasBeenControlled = (game: { created?: string; updated?: string }) => Boolean(game.created && game.updated && game.created !== game.updated);
   const getClosedStatus = (game: { created?: string; updated?: string }): GameStatusKey => hasBeenControlled(game) ? "closed" : "notOpen";
-  const getGroupBasedGameStatus = (game: typeof snapshot.state.games[number], completed: boolean): GameStatusKey => {
+  const getGroupBasedGameStatus = (game: typeof snapshot.games[number], completed: boolean): GameStatusKey => {
     if (completed) return "done";
     if (!game.isOpen) return getClosedStatus(game);
     return (game.quizOpenGroups || []).length > 0 ? "continueQuiz" : "gameStarted";
   };
-  const getLobbyGameStatus = (game: typeof snapshot.state.games[number], completed: boolean, bingoPending = false): GameStatusKey => {
+  const getLobbyGameStatus = (game: typeof snapshot.games[number], completed: boolean, bingoPending = false): GameStatusKey => {
     if (completed) return "done";
     if (game.key === "bingo") {
       const phase = game.bingoPhase || "open";
@@ -109,7 +109,7 @@ export default function LobbyPage() {
           <ScorePanel totalScore={player.totalScore} rank={snapshot.rank} />
 
           <section className="lobbyGameList">
-            {snapshot.state.games.sort((a, b) => a.order - b.order).map((game) => {
+            {snapshot.games.sort((a, b) => a.order - b.order).map((game) => {
               const isBingo = game.key === "bingo";
               const userBingoResult = isBingo
                 ? snapshot.results.find((result) => result.gameKey === "bingo")

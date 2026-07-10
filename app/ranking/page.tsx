@@ -12,10 +12,10 @@ import { useCurrentPlayer, useRanking } from "@/hooks/use-game-data";
 export default function RankingPage() {
   const t = useTranslations();
   const { playerId } = useCurrentPlayer();
-  const { ranking } = useRanking(playerId, 4000);
+  const { ranking } = useRanking(playerId);
 
   const context = ranking.context;
-  const player = context?.player && ranking.players.some((item) => item.id === context.player?.playerId) ? context.player : null;
+  const player = context?.player || null;
   const rank = context?.rank || 0;
   const isInTop10 = rank > 0 && rank <= 10;
 

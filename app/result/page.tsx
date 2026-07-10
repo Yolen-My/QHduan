@@ -16,16 +16,15 @@ export default function ResultPage() {
   const t = useTranslations();
   const { player, playerId, loading: playerLoading } = useCurrentPlayer();
   const { snapshot, loading: snapshotLoading } = useLobbySnapshot(playerId);
-  const { ranking, loading: rankingLoading } = useRanking(playerId, 1500);
+  const { ranking, loading: rankingLoading } = useRanking(playerId);
 
   useEffect(() => {
     if (playerId === null) router.replace("/register");
   }, [playerId, router]);
 
-  const rankedPlayer = playerId ? ranking.players.find((item) => item.id === playerId) : null;
-  const currentPlayer = snapshot?.player || player || rankedPlayer || null;
-  const currentRank = ranking.context?.rank || (currentPlayer ? ranking.players.findIndex((item) => item.id === currentPlayer.id) + 1 : 0);
-  const playerResults = snapshot?.results || (playerId ? ranking.results.filter((result) => result.player === playerId) : []);
+  const currentPlayer = snapshot?.player || player || null;
+  const currentRank = ranking.context?.rank || 0;
+  const playerResults = snapshot?.results || [];
   const lastResult = playerResults
     .slice()
     .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime())[0];

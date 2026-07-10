@@ -7,7 +7,7 @@ import { useEffect, useMemo } from "react";
 import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import { getGameResult, getQuestions } from "@/lib/storage";
-import { useCurrentPlayer, useAppState } from "@/hooks/use-game-data";
+import { useCurrentPlayer, useAppState, useAllQuestions } from "@/hooks/use-game-data";
 import type { GameKey, GameResult, Question } from "@/types";
 
 const GAME_ORDER: GameKey[] = ["bingo", "quiz", "story", "elimination"];
@@ -189,7 +189,8 @@ export default function ReviewPage() {
   const router = useRouter();
   const t = useTranslations();
   const { playerId, player } = useCurrentPlayer();
-  const { state } = useAppState(4000);
+  const { state } = useAppState();
+  const { questions: allQuestions } = useAllQuestions();
 
   useEffect(() => {
     if (playerId === null) router.push("/register");
@@ -222,13 +223,13 @@ export default function ReviewPage() {
     if (results.length > 0) {
       rMap.set(key, results);
     }
-      const qs = state.questions.filter((q) => q.gameKey === key && q.isActive);
+      const qs = allQuestions.filter((q) => q.gameKey === key && q.isActive);
       if (qs.length > 0) {
         qMap.set(key, qs);
       }
     }
     return [rMap, qMap];
-  }, [gamesWithResults, state.gameResults, state.questions, playerId]);
+  }, [gamesWithResults, state.gameResults, allQuestions, playerId]);
 
   if (!player) {
     return (

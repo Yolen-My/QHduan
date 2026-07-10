@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Layout from "@/components/Layout";
 import { GAME_ORDER, GAME_DISPLAY_NAMES } from "@/lib/constants";
 import { loadState, resetDemoData } from "@/lib/storage";
-import { useAdminActions, useAppState } from "@/hooks/use-game-data";
+import { useAdminActions, useAppState, useAdminStats, useAllQuestions } from "@/hooks/use-game-data";
 import type { GameKey } from "@/types";
 
 const QUIZ_SECTOR_COUNT = 5;
@@ -28,7 +28,9 @@ function getGroupName(index: number): string {
 }
 
 export default function AdminControlPage() {
-  const { state, refresh } = useAppState(2000);
+  const { state, refresh } = useAppState();
+  const { stats } = useAdminStats();
+  const { questions: allQuestions } = useAllQuestions();
   const {
     toggleGameOpen,
     triggerBingoScore,
@@ -41,14 +43,20 @@ export default function AdminControlPage() {
   const completion = useMemo(() => {
     return GAME_ORDER.map((key) => ({
       key,
-      count: state.gameResults.filter((result) => result.gameKey === key).length
+      count: stats?.resultCounts?.[key] ?? 0
     }));
-  }, [state.gameResults]);
+  }, [stats]);
+
+  // 结果记录总数与参与人数来自 admin 聚合快照(每 2s 轮询)
+  const totalResults = useMemo(
+    () => (stats ? Object.values(stats.resultCounts).reduce((sum, n) => sum + n, 0) : 0),
+    [stats]
+  );
 
   const bingoGame = state.games.find((game) => game.key === "bingo");
   const bingoPhase = bingoGame?.bingoPhase || "open";
   const bingoCompletionCount = completion.find((item) => item.key === "bingo")?.count || 0;
-  const pendingBingoCount = state.gameResults.filter((result) => result.gameKey === "bingo" && result.pendingBingoScore).length;
+  const pendingBingoCount = stats?.pendingBingo ?? 0;
 
   const quizGame = state.games.find((game) => game.key === "quiz");
   const quizOpenGroups = quizGame?.quizOpenGroups || [];
@@ -58,7 +66,7 @@ export default function AdminControlPage() {
   const storyOpenGroups = storyGame?.quizOpenGroups || [];
 
   const quizSectors = useMemo(() => {
-    const activeQuizQuestions = state.questions
+    const activeQuizQuestions = allQuestions
       .filter((question) => question.gameKey === "quiz" && question.isActive === true)
       .map((question) => ({
         ...question,
@@ -71,64 +79,46 @@ export default function AdminControlPage() {
       const questions = activeQuizQuestions
         .filter((question) => question.quizSessionIndex === index)
         .sort((a, b) => a.order - b.order);
-      const completedPlayers = new Set(
-        state.gameResults
-          .filter((result) => (
-            result.gameKey === "quiz" &&
-            (Number.isInteger(result.quizSessionIndex) ? result.quizSessionIndex : 0) === index
-          ))
-          .map((result) => result.player)
-      );
 
       return {
         index,
         sectorName: getSectorName(index, questions),
         questions,
         isOpen: quizOpenGroups.includes(index),
-        completedCount: completedPlayers.size
+        completedCount: stats?.quizSectorCounts?.[index] ?? 0
       };
     });
-  }, [quizOpenGroups, state.gameResults, state.questions]);
+  }, [quizOpenGroups, stats, allQuestions]);
 
   const eliminationMissions = useMemo(() => {
-    const activeQuestions = state.questions
+    const activeQuestions = allQuestions
       .filter((question) => question.gameKey === "elimination" && question.isActive === true)
       .sort((a, b) => a.order - b.order)
       .slice(0, ELIMINATION_MISSION_COUNT);
-    const completedPlayers = new Set(
-      state.gameResults
-        .filter((result) => result.gameKey === "elimination")
-        .map((result) => result.player)
-    );
 
     return Array.from({ length: ELIMINATION_MISSION_COUNT }, (_, index) => ({
       index,
       missionName: getMissionName(index),
       questions: activeQuestions[index] ? [activeQuestions[index]] : [],
       isOpen: eliminationOpenMissions.includes(index),
-      completedCount: completedPlayers.size
+      completedCount: stats?.resultCounts?.elimination ?? 0
     }));
-  }, [eliminationOpenMissions, state.gameResults, state.questions]);
+  }, [eliminationOpenMissions, stats, allQuestions]);
 
   const storyGroups = useMemo(() => {
-    const activeQuestions = state.questions
+    const activeQuestions = allQuestions
       .filter((question) => question.gameKey === "story" && question.isActive === true)
       .sort((a, b) => a.order - b.order)
       .slice(0, STORY_GROUP_COUNT);
-    const completedPlayers = new Set(
-      state.gameResults
-        .filter((result) => result.gameKey === "story")
-        .map((result) => result.player)
-    );
 
     return Array.from({ length: STORY_GROUP_COUNT }, (_, index) => ({
       index,
       groupName: getGroupName(index),
       questions: activeQuestions[index] ? [activeQuestions[index]] : [],
       isOpen: storyOpenGroups.includes(index),
-      completedCount: completedPlayers.size
+      completedCount: stats?.resultCounts?.story ?? 0
     }));
-  }, [storyOpenGroups, state.gameResults, state.questions]);
+  }, [storyOpenGroups, stats, allQuestions]);
 
   async function refreshOnce() {
     await refresh();
@@ -236,15 +226,15 @@ export default function AdminControlPage() {
       <section className="scoreGrid">
         <div>
           <span>参与人数</span>
-          <b>{state.players.length}</b>
+          <b>{stats?.participantCount ?? 0}</b>
         </div>
         <div>
           <span>结果记录</span>
-          <b>{state.gameResults.length}</b>
+          <b>{totalResults}</b>
         </div>
         <div>
-          <span>已完成</span>
-          <b>{state.players.filter((player) => player.finalSubmitted).length}</b>
+          <span>等待判分</span>
+          <b>{pendingBingoCount}</b>
         </div>
       </section>
 
