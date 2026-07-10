@@ -191,7 +191,7 @@ export default function BingoPage() {
     }
 
     pollBingoResult();
-    const timer = window.setInterval(pollBingoResult, 1000);
+    const timer = window.setInterval(pollBingoResult, 5000);
     return () => {
       active = false;
       window.clearInterval(timer);

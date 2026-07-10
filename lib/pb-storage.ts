@@ -647,142 +647,14 @@ export async function toggleGameOpen(gameKey: GameKey): Promise<void> {
 }
 
 export async function triggerBingoScore(): Promise<AppState> {
-  console.log("🎮 completeBossAndEnableAutoScore: 开始执行");
-  
-  let state = await loadState();
-  console.log("📊 加载的当前状态：", {
-    playersCount: state.players.length,
-    gameResultsCount: state.gameResults.length,
-    bingoPendingCount: state.gameResults.filter(r => r.gameKey === "bingo" && r.pendingBingoScore).length
-  });
-  
-  // 1. 找到所有 pendingBingoScore=true 的 Bingo 记录并判分
-  const gameResults = state.gameResults.map((result) => {
-    if (result.gameKey !== "bingo" || !result.pendingBingoScore) return result;
-    const settled = calculateBingoSelection(state.questions, result.answers, result.score);
-    return {
-      ...result,
-      answers: {
-        ...result.answers,
-        selectedWords: settled.selectedWords,
-        targetWords: settled.targetWords,
-        correctCount: settled.correctCount,
-        pendingBingoScore: false
-      },
-      score: settled.score,
-      pendingBingoScore: false
-    };
-  });
-
-  // 1.5 为没有提交过 Bingo 记录的玩家自动创建一条空 Bingo 记录（review 页面可显示正确答案）
-  const playersWithoutBingo = state.players.filter(
-    (p) => !gameResults.some((r) => r.player === p.id && r.gameKey === "bingo")
-  );
-  const autoCreatedBingoResults: GameResult[] = [];
-  for (const player of playersWithoutBingo) {
-    const settled = calculateBingoSelection(state.questions, {}, 0);
-    autoCreatedBingoResults.push({
-      id: createId("result"),
-      player: player.id,
-      gameKey: "bingo",
-      answers: {
-        selectedWords: settled.selectedWords,
-        targetWords: settled.targetWords,
-        correctCount: settled.correctCount
-      },
-      score: 0,
-      maxScore: 100,
-      completedAt: nowIso(),
-      pendingBingoScore: false
-    });
+  const res = await fetch("/api/admin/bingo-score", { method: "POST" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.ok) {
+    throw new Error(body?.error || "Bingo 判分失败，请重试");
   }
-  gameResults.push(...autoCreatedBingoResults);
-
-  // 2. 重新计算所有玩家的 completedGames 和 totalScore
-  const players = state.players.map((player) => {
-    const playerResults = gameResults.filter((result) => result.player === player.id && !result.pendingBingoScore);
-    const completedGames = getCompletedGamesForPlayer(player, playerResults, "bingo");
-    const finalSubmitted = GAME_ORDER.every((key) => completedGames.includes(key));
-    const totalScore = playerResults.reduce((sum, result) => sum + result.score, 0);
-
-    return {
-      ...player,
-      totalScore,
-      completedGames,
-      finalSubmitted,
-      finalCompletedAt: finalSubmitted ? player.finalCompletedAt || nowIso() : player.finalCompletedAt,
-      updated: nowIso()
-    };
-  });
-
-  // 3. 更新 Bingo 状态：bingoPhase=closed, isOpen=false（判分后直接完全关闭）
-  const newGames = state.games.map((game) => (
-    game.key === "bingo"
-      ? { ...game, isOpen: false, bingoScored: true, bingoPhase: "closed" as const }
-      : game
-  ));
-  const newState = { ...state, players, gameResults, games: newGames };
-
-  const available = await checkPocketBase();
-  if (available) {
-    console.log("🔌 PocketBase 可用，开始同步数据...");
-    
-    try {
-      const pendingResults = await pb.collection("game_results").getFullList({ 
-        filter: "gameKey = 'bingo'"
-      });
-      
-      for (const result of pendingResults) {
-        if (mapPendingBingoScore(result)) {
-          const settled = gameResults.find((item) => item.id === result.id);
-          await pb.collection("game_results").update(result.id, {
-            pendingBingoScore: false,
-            score: settled?.score ?? result.score,
-            answers: settled?.answers ?? { ...result.answers, pendingBingoScore: false }
-          });
-        }
-      }
-
-      // 为没提交 Bingo 的玩家自动创建空 Bingo 记录到 PocketBase
-      for (const autoResult of autoCreatedBingoResults) {
-        const created = await pb.collection("game_results").create({
-          player: autoResult.player,
-          gameKey: autoResult.gameKey,
-          answers: autoResult.answers,
-          score: autoResult.score,
-          maxScore: autoResult.maxScore,
-          completedAt: autoResult.completedAt,
-          pendingBingoScore: false
-        });
-        autoResult.id = created.id;
-      }
-
-      for (const player of newState.players) {
-        await pb.collection("players").update(player.id, buildPlayerUpdate(player));
-      }
-
-      const list = await pb.collection("games").getFullList();
-      const bingo = list.find(g => g.key === "bingo");
-      if (bingo) {
-        await pb.collection("games").update(bingo.id, {
-          isOpen: false,
-          bingoScored: true,
-          bingoPhase: "closed"
-        });
-      }
-
-      console.log("✅ PocketBase 数据同步完成");
-    } catch (error) {
-      console.error("❌ PocketBase 同步失败:", error);
-      throw error;
-    }
-  }
-
-  if (!available) throw new Error("PocketBase 不可用，已禁用本地兜底数据");
-  await saveState(newState);
-  const finalState = await loadStateFromPB();
-  console.log("🎯 completeBossAndEnableAutoScore: 执行完成");
-  return finalState;
+  await saveState(getEmptyRuntimeState());
+  // admin 页是单客户端,判分后全量刷新一次用于展示
+  return await loadStateFromPB();
 }
 
 // 别名，语义更清晰
@@ -1133,41 +1005,15 @@ export async function getRankingSnapshot(playerId?: string | null) {
 
 export async function resetDemoData(): Promise<void> {
   if (!isBrowser()) return;
-
-  const available = await checkPocketBase();
-  if (available) {
-    try {
-      const players = await pb.collection("players").getFullList();
-      const results = await pb.collection("game_results").getFullList();
-      const games = await pb.collection("games").getFullList();
-
-      for (const p of players) {
-        await pb.collection("players").delete(p.id);
-      }
-      for (const r of results) {
-        await pb.collection("game_results").delete(r.id);
-      }
-      for (const game of games) {
-        const updateData: Record<string, unknown> = {
-          isOpen: false,
-          bingoScored: game.key === "bingo" ? false : Boolean(game.bingoScored)
-        };
-        if (game.key === "quiz" || game.key === "elimination" || game.key === "story") {
-          if (game.key === "quiz") {
-            updateData.quizCurrentGroup = 0;
-          }
-          updateData.quizOpenGroups = [];
-        }
-        await pb.collection("games").update(game.id, updateData);
-      }
-    } catch {}
+  const res = await fetch("/api/admin/reset-demo", { method: "POST" });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.ok) {
+    throw new Error(body?.error || "重置失败，请重试");
   }
-
   window.localStorage.removeItem("annual_game_demo_state_v3");
   window.localStorage.removeItem(PLAYER_ID_KEY);
   window.localStorage.removeItem(PLAYER_PHONE_KEY);
   window.localStorage.removeItem(PLAYER_CACHE_KEY);
-  await loadState();
 }
 
 export function subscribeToState(callback: () => void): () => void {
