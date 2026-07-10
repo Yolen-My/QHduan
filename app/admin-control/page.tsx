@@ -135,10 +135,9 @@ export default function AdminControlPage() {
   }
 
   async function handleToggle(key: GameKey) {
-    const nextState = await toggleGameOpen(key);
-    const game = nextState.games.find((item) => item.key === key);
-    setExportText(`${GAME_DISPLAY_NAMES[key]} 已${game?.isOpen ? "开启" : "关闭"}`);
+    await toggleGameOpen(key);
     await refreshOnce();
+    setExportText(`${GAME_DISPLAY_NAMES[key]} 已切换开关状态`);
   }
 
   async function handleBingoScore() {

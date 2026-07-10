@@ -394,7 +394,7 @@ export async function isGameOpen(gameKey: GameKey): Promise<boolean> {
   return Boolean(state.games.find((game) => game.key === gameKey)?.isOpen);
 }
 
-export async function toggleGameOpen(gameKey: GameKey): Promise<AppState> {
+export async function toggleGameOpen(gameKey: GameKey): Promise<void> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.toggleGameOpen(gameKey);
@@ -412,7 +412,6 @@ export async function toggleGameOpen(gameKey: GameKey): Promise<AppState> {
     return { ...game, isOpen };
   });
   saveStateLocal(state);
-  return state;
 }
 
 export async function triggerBingoScore(): Promise<AppState> {
@@ -430,7 +429,7 @@ export async function triggerBingoScore(): Promise<AppState> {
   return state;
 }
 
-export async function closeBingoGame(): Promise<AppState> {
+export async function closeBingoGame(): Promise<void> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.closeBingoGame();
@@ -442,10 +441,9 @@ export async function closeBingoGame(): Promise<AppState> {
       : game
   ));
   saveStateLocal(state);
-  return state;
 }
 
-export async function advanceQuizGroup(): Promise<AppState> {
+export async function advanceQuizGroup(): Promise<void> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.advanceQuizGroup();
@@ -459,10 +457,9 @@ export async function advanceQuizGroup(): Promise<AppState> {
     return { ...game, quizCurrentGroup: nextGroup, quizOpenGroups };
   });
   saveStateLocal(state);
-  return state;
 }
 
-export async function openQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<AppState> {
+export async function openQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<void> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.openQuizGroup(groupIndex, gameKey);
@@ -482,10 +479,9 @@ export async function openQuizGroup(groupIndex: number, gameKey: GameKey = "quiz
       : game
   ));
   saveStateLocal(state);
-  return state;
 }
 
-export async function closeQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<AppState> {
+export async function closeQuizGroup(groupIndex: number, gameKey: GameKey = "quiz"): Promise<void> {
   const available = await checkBackend();
   if (available) {
     return await pbStorage.closeQuizGroup(groupIndex, gameKey);
@@ -505,7 +501,6 @@ export async function closeQuizGroup(groupIndex: number, gameKey: GameKey = "qui
     };
   });
   saveStateLocal(state);
-  return state;
 }
 
 export async function submitGameResult(input: {
