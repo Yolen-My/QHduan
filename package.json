@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.0",
+    "eventsource": "^4.1.0",
     "ioredis": "^5.11.1",
     "next": "^16.2.6",
     "next-intl": "^4.13.0",

@@ -1,3 +1,8 @@
+// Node.js lacks a native EventSource; PocketBase realtime uses it for SSE.
+// Polyfill must be set before importing pocketbase.
+import { EventSource } from "eventsource";
+(globalThis as any).EventSource = EventSource;
+
 import PocketBase from "pocketbase";
 import Redis from "ioredis";
 import {
