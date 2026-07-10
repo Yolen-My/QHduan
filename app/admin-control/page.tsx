@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Layout from "@/components/Layout";
 import { GAME_ORDER, GAME_DISPLAY_NAMES } from "@/lib/constants";
 import { resetDemoData } from "@/lib/storage";
@@ -28,7 +28,111 @@ function getGroupName(index: number): string {
   return `Group ${index + 1}`;
 }
 
+function LoginGate({ onAuthed }: { onAuthed: () => void }) {
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      if (res.ok) {
+        onAuthed();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error || "用户名或密码错误");
+      }
+    } catch {
+      setError("网络错误，请重试");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Layout title="管理员登录" eyebrow="ADMIN LOGIN">
+      <section className="sectionBlock">
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 320 }}>
+          <div className="adminRow" style={{ flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
+            <label htmlFor="admin-username"><b>用户名</b></label>
+            <input
+              id="admin-username"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+              style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(64,216,138,0.3)", background: "rgba(64,216,138,0.06)", color: "var(--ink)", fontSize: 15 }}
+            />
+          </div>
+          <div className="adminRow" style={{ flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
+            <label htmlFor="admin-password"><b>密码</b></label>
+            <input
+              id="admin-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(64,216,138,0.3)", background: "rgba(64,216,138,0.06)", color: "var(--ink)", fontSize: 15 }}
+            />
+          </div>
+          {error && <span style={{ color: "#ff6b6b", fontSize: 14 }}>{error}</span>}
+          <div className="pageActions">
+            <button className="primaryButton" type="submit" disabled={loading}>
+              {loading ? "登录中…" : "登录"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </Layout>
+  );
+}
+
 export default function AdminControlPage() {
+  const [authed, setAuthed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/stats")
+      .then((res) => {
+        if (res.status === 401) {
+          setAuthed(false);
+        } else {
+          setAuthed(true);
+        }
+      })
+      .catch(() => {
+        // Network/other error — assume logged in, show page
+        setAuthed(true);
+      });
+  }, []);
+
+  if (authed === null) {
+    return (
+      <Layout title="现场控制台" eyebrow="ADMIN CONTROL">
+        <section className="sectionBlock">
+          <span>加载中…</span>
+        </section>
+      </Layout>
+    );
+  }
+
+  if (authed === false) {
+    return <LoginGate onAuthed={() => setAuthed(true)} />;
+  }
+
+  return <AdminControlInner />;
+}
+
+function AdminControlInner() {
   const { state, refresh } = useAppState();
   const { stats } = useAdminStats();
   const { questions: allQuestions } = useAllQuestions();
