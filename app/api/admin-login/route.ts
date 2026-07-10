@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ADMIN_COOKIE_NAME, getAdminSessionValue } from "@/lib/server/admin-auth";
 
 export async function POST(request: Request) {
   try {
@@ -16,7 +17,14 @@ export async function POST(request: Request) {
     }
 
     if (username === adminUsername && password === adminPassword) {
-      return NextResponse.json({ ok: true });
+      const res = NextResponse.json({ ok: true });
+      res.cookies.set(ADMIN_COOKIE_NAME, getAdminSessionValue(), {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production"
+      });
+      return res;
     }
 
     return NextResponse.json(
