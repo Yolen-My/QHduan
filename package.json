@@ -7,21 +7,26 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --test lib/scoring.test.ts lib/business.test.ts lib/integration.test.ts"
+    "test": "node --test lib/scoring.test.ts lib/business.test.ts lib/integration.test.ts",
+    "gateway": "node gateway/server.ts",
+    "test:gateway": "node --test gateway/snapshot.test.ts"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.0",
+    "ioredis": "^5.11.1",
     "next": "^16.2.6",
     "next-intl": "^4.13.0",
     "pocketbase": "^0.27.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "tailwindcss": "^4.3.0",
+    "ws": "^8.21.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
+    "@types/ws": "^8.18.1",
     "typescript": "^6.0.3"
   }
 }

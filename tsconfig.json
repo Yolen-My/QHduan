@@ -45,6 +45,7 @@
     "pb_migrations",
     "pb_migrations_disabled_empty",
     "pb_migrations_backup",
-    "scripts"
+    "scripts",
+    "gateway"
   ]
 }
