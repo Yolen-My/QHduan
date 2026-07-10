@@ -438,6 +438,7 @@ export function saveCurrentPlayer(player: Player): void {
     window.localStorage.setItem(PLAYER_PHONE_KEY, player.phone);
   }
   setCachedPlayer(player);
+  window.dispatchEvent(new Event("annual-game-player-change"));
 }
 
 export function clearCurrentPlayer(): void {
@@ -445,6 +446,7 @@ export function clearCurrentPlayer(): void {
   window.localStorage.removeItem(PLAYER_ID_KEY);
   window.localStorage.removeItem(PLAYER_PHONE_KEY);
   window.localStorage.removeItem(PLAYER_CACHE_KEY);
+  window.dispatchEvent(new Event("annual-game-player-change"));
 }
 
 export async function findPlayerByPhone(phone: string): Promise<Player | null> {
@@ -524,6 +526,8 @@ export async function registerPlayer(input: { name: string; phone: string; offic
       window.localStorage.setItem(PLAYER_ID_KEY, player.id);
       window.localStorage.setItem(PLAYER_PHONE_KEY, phone);
       setCachedPlayer(player);
+      // 玩家身份落地 → 通知 RealtimeProvider 重发 hello,订阅个人事件通道
+      window.dispatchEvent(new Event("annual-game-player-change"));
       if (dispatch) window.dispatchEvent(new Event("annual-game-state-change"));
     };
 

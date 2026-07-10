@@ -57,8 +57,6 @@ function usePersonalData(playerId: string | null | undefined) {
   const { subscribePersonal, connected } = useRealtime();
   const [data, setData] = useState<LobbyData | null>(null);
   const [loading, setLoading] = useState(true);
-  const playerIdRef = useRef<string | null | undefined>(playerId);
-  playerIdRef.current = playerId;
 
   const refresh = useCallback(async (maxAgeMs = 0) => {
     if (!playerId) {
@@ -82,9 +80,10 @@ function usePersonalData(playerId: string | null | undefined) {
     setData(null);
     setLoading(true);
     refresh(1000);
-    // 个人事件 → 错峰刷新
+    // 个人事件 → 错峰刷新;maxAge=2000 使 jitter 窗口内多个 hook 实例命中
+    // getLobbyShared 的共享缓存/inflight,判分风暴下去重为每客户端 1 次请求
     const unsub = subscribePersonal(() => {
-      window.setTimeout(() => refresh(0), Math.random() * EVENT_JITTER_MS);
+      window.setTimeout(() => refresh(2000), Math.random() * EVENT_JITTER_MS);
     });
     // 低频兜底(断线/漏事件保护)
     const timer = window.setInterval(() => {

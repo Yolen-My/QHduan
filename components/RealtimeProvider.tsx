@@ -57,6 +57,7 @@ export default function RealtimeProvider({ children }: { children: React.ReactNo
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(1000);
   const pollTimerRef = useRef<number | null>(null);
+  const pollKickoffRef = useRef<number | null>(null);
   const disposedRef = useRef(false);
 
   const subscribePersonal = useCallback((cb: PersonalListener) => {
@@ -69,15 +70,26 @@ export default function RealtimeProvider({ children }: { children: React.ReactNo
     listenersRef.current.forEach((cb) => cb(name, gameKey));
   }, []);
 
+  const sendHello = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const playerId = window.localStorage.getItem(PLAYER_ID_KEY);
+    ws.send(JSON.stringify({ type: "hello", playerId }));
+  }, []);
+
   const stopFallbackPoll = useCallback(() => {
     if (pollTimerRef.current !== null) {
       window.clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    if (pollKickoffRef.current !== null) {
+      window.clearTimeout(pollKickoffRef.current);
+      pollKickoffRef.current = null;
+    }
   }, []);
 
   const startFallbackPoll = useCallback(() => {
-    if (pollTimerRef.current !== null) return;
+    if (pollTimerRef.current !== null || pollKickoffRef.current !== null) return;
     const poll = async () => {
       if (document.visibilityState === "hidden") return;
       try {
@@ -87,8 +99,13 @@ export default function RealtimeProvider({ children }: { children: React.ReactNo
         if (data.games?.games) setGames(data.games.games);
       } catch {}
     };
-    poll();
-    pollTimerRef.current = window.setInterval(poll, FALLBACK_POLL_MS);
+    // 首次 poll 抖动错峰,避免大量客户端同时降级造成 thundering herd
+    pollKickoffRef.current = window.setTimeout(() => {
+      pollKickoffRef.current = null;
+      poll();
+      // 轮询间隔加 ±25% 抖动
+      pollTimerRef.current = window.setInterval(poll, FALLBACK_POLL_MS * (0.75 + Math.random() * 0.5));
+    }, Math.random() * 3000);
   }, []);
 
   useEffect(() => {
@@ -105,8 +122,7 @@ export default function RealtimeProvider({ children }: { children: React.ReactNo
         setConnected(true);
         stopFallbackPoll();
         backoffRef.current = 1000;
-        const playerId = window.localStorage.getItem(PLAYER_ID_KEY);
-        ws.send(JSON.stringify({ type: "hello", playerId }));
+        sendHello();
       };
 
       ws.onmessage = (event) => {
@@ -123,8 +139,9 @@ export default function RealtimeProvider({ children }: { children: React.ReactNo
         wsRef.current = null;
         if (disposedRef.current) return;
         startFallbackPoll();
-        const delay = backoffRef.current;
-        backoffRef.current = Math.min(MAX_BACKOFF_MS, delay * 2);
+        // 抖动:实际延迟 = backoff * [0.5,1.5),避免重连风暴; backoff 本身仍 ×2 封顶 30s
+        const delay = backoffRef.current * (0.5 + Math.random());
+        backoffRef.current = Math.min(MAX_BACKOFF_MS, backoffRef.current * 2);
         window.setTimeout(connect, delay);
       };
 
@@ -132,12 +149,17 @@ export default function RealtimeProvider({ children }: { children: React.ReactNo
     };
 
     connect();
+
+    // 玩家身份变化(注册/登录/登出)时重发 hello,刷新个人事件通道订阅
+    window.addEventListener("annual-game-player-change", sendHello);
+
     return () => {
       disposedRef.current = true;
+      window.removeEventListener("annual-game-player-change", sendHello);
       stopFallbackPoll();
       wsRef.current?.close();
     };
-  }, [emitPersonal, startFallbackPoll, stopFallbackPoll]);
+  }, [emitPersonal, startFallbackPoll, stopFallbackPoll, sendHello]);
 
   return (
     <RealtimeContext.Provider value={{ connected, ranking, games, lastPersonalEventAt, subscribePersonal }}>
