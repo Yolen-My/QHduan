@@ -48,7 +48,7 @@ function LoginGate({ onAuthed }: { onAuthed: () => void }) {
         onAuthed();
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data?.error || "用户名或密码错误");
+        setError(data?.message || "用户名或密码错误");
       }
     } catch {
       setError("网络错误，请重试");

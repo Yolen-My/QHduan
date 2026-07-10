@@ -10,9 +10,14 @@ const ADMIN_COOKIE_NAME = "admin_session";
  * 依赖 ADMIN_PASSWORD 与 ADMIN_API_TOKEN 两个服务端密钥。
  */
 export function getAdminSessionValue(): string {
+  const password = process.env.ADMIN_PASSWORD;
+  const token = process.env.ADMIN_API_TOKEN;
+  if (!password || !token) {
+    throw new Error("ADMIN_PASSWORD / ADMIN_API_TOKEN 未配置");
+  }
   return crypto
     .createHash("sha256")
-    .update(`${process.env.ADMIN_PASSWORD}:${process.env.ADMIN_API_TOKEN}`)
+    .update(`${password}:${token}`)
     .digest("hex");
 }
 
@@ -21,23 +26,28 @@ export function getAdminSessionValue(): string {
  * 使用 timingSafeEqual 做恒定时间比较，避免旁路攻击。
  */
 export function verifyAdminCookie(request: Request): boolean {
-  const cookieHeader = request.headers.get("cookie");
-  if (!cookieHeader) return false;
+  try {
+    const cookieHeader = request.headers.get("cookie");
+    if (!cookieHeader) return false;
 
-  const match = cookieHeader
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${ADMIN_COOKIE_NAME}=`));
-  if (!match) return false;
+    const match = cookieHeader
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${ADMIN_COOKIE_NAME}=`));
+    if (!match) return false;
 
-  const provided = match.slice(`${ADMIN_COOKIE_NAME}=`.length);
-  const expected = getAdminSessionValue();
+    const provided = match.slice(`${ADMIN_COOKIE_NAME}=`.length);
+    const expected = getAdminSessionValue();
 
-  const providedBuf = Buffer.from(provided);
-  const expectedBuf = Buffer.from(expected);
-  // 长度不等时 timingSafeEqual 会抛错，先挡掉（本身也代表不匹配）。
-  if (providedBuf.length !== expectedBuf.length) return false;
-  return crypto.timingSafeEqual(providedBuf, expectedBuf);
+    const providedBuf = Buffer.from(provided);
+    const expectedBuf = Buffer.from(expected);
+    // 长度不等时 timingSafeEqual 会抛错，先挡掉（本身也代表不匹配）。
+    if (providedBuf.length !== expectedBuf.length) return false;
+    return crypto.timingSafeEqual(providedBuf, expectedBuf);
+  } catch {
+    // getAdminSessionValue 抛错时（env 缺省），一律拒绝，不暴露 500
+    return false;
+  }
 }
 
 export { ADMIN_COOKIE_NAME };
