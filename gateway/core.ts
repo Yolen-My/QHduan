@@ -18,7 +18,7 @@ import {
 import type { Game, Player } from "../types/index.ts";
 
 const DEBOUNCE_MS = 300;         // 事件合并窗口
-const MIN_PUSH_INTERVAL_MS = 1500; // 快照最小推送间隔(带宽预算的核心闸门)
+const MIN_PUSH_INTERVAL_MS = 1000; // 快照最小推送间隔(带宽预算的核心闸门)
 const FALLBACK_POLL_MS = 2000;   // realtime 订阅失败时网关自身的兜底轮询(全场仍只有这一处轮询)
 
 type GatewayEvents = {
