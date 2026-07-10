@@ -11,6 +11,13 @@
 - PocketBase SDK
 - 本地 DEMO 数据层：`localStorage`
 
+## 运行拓扑（性能优化版）
+
+- `realtime-gateway`（gateway/，`:8100`）：全场唯一 PocketBase realtime 订阅者，计算排行/游戏状态快照写入 Redis 并经 WebSocket 推送。
+- Next.js API（`app/api/`）：个人数据（`/api/lobby`）、聚合快照（`/api/state`）、题库缓存（`/api/questions`）、管理操作转发（`/api/admin/*`）。
+- Redis（`127.0.0.1:6379`）：快照与题库缓存，不承载持久数据。
+- 启动：`npm run gateway`（开发）或 `pm2 start ecosystem.config.js`（生产，见 `docs/superpowers/deploy/`）。
+
 ## 本地启动
 
 ```bash

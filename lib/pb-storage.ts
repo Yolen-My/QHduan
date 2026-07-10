@@ -3,8 +3,7 @@
 import { pb } from "@/lib/pocketbase";
 import { calculateBingoSelection } from "@/lib/bingo-scoring";
 import { GAME_ORDER, GAMES, PLAYER_CACHE_KEY, PLAYER_ID_KEY, PLAYER_PHONE_KEY } from "@/lib/constants";
-import { getOfficeAverageRanking, getOfficeTop3, getPlayerRank, getPlayerRankingContext, getTop10Ranking } from "@/lib/ranking";
-import type { AppState, Game, GameKey, GameResult, Player, Question, QuizProgress, QuizSessionSnapshot } from "@/types";
+import type { AppState, Game, GameKey, GameResult, Player, Question } from "@/types";
 
 let pocketBaseAvailable = false;
 let lastHealthCheckAt = 0;
@@ -107,28 +106,6 @@ function getCompletedGamesForPlayer(player: Player, playerResults: GameResult[],
   return GAME_ORDER.filter((key) => completedGames.has(key));
 }
 
-function buildQuizProgress(state: AppState, playerId: string): QuizProgress {
-  const quizGame = state.games.find((game) => game.key === "quiz");
-  const openGroups = normalizeQuizOpenGroups(quizGame?.quizOpenGroups || []);
-  const quizResults = state.gameResults
-    .filter((result) => result.player === playerId && result.gameKey === "quiz" && !result.pendingBingoScore)
-    .map(normalizeGameResult);
-  const completedGroups = normalizeQuizOpenGroups(quizResults
-    .map((result) => result.quizSessionIndex)
-    .filter((index): index is number => Number.isInteger(index)));
-  const completedSet = new Set(completedGroups);
-  const availableGroups = openGroups.filter((group) => !completedSet.has(group));
-
-  return {
-    completedCount: completedGroups.length,
-    totalCount: 5,
-    score: quizResults.reduce((sum, result) => sum + result.score, 0),
-    maxScore: 100,
-    openGroups,
-    availableGroups,
-    completedGroups
-  };
-}
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -423,18 +400,6 @@ export function getInitialState(): AppState {
   return getEmptyRuntimeState();
 }
 
-export async function loadState(): Promise<AppState> {
-  const available = await checkPocketBase();
-  if (available) {
-    return await loadStateFromPB();
-  }
-  return getEmptyRuntimeState();
-}
-
-export async function saveStateToPB(state: AppState): Promise<void> {
-  const available = await checkPocketBase();
-  if (!available) return;
-}
 
 export async function saveState(state: AppState): Promise<void> {
   const available = await checkPocketBase();
@@ -872,135 +837,7 @@ export async function getQuestions(gameKey: GameKey) {
   return [];
 }
 
-export async function getQuizSessionSnapshot(playerId: string): Promise<QuizSessionSnapshot> {
-  const available = await checkPocketBase();
-  if (!available) return { openGroups: [], completedGroups: [], results: [] };
-  try {
-    const [quizGame, records] = await Promise.all([
-      pb.collection("games").getFirstListItem(pb.filter("key = 'quiz'")).catch(() => null),
-      pb.collection("game_results").getFullList({
-        filter: pb.filter("player = {:playerId} && gameKey = 'quiz'", { playerId })
-      })
-    ]);
-    const results = records.map(mapResultRecord);
-    return {
-      openGroups: normalizeQuizOpenGroups(quizGame?.quizOpenGroups || []),
-      completedGroups: normalizeQuizOpenGroups(results
-        .map((result) => result.quizSessionIndex)
-        .filter((index): index is number => Number.isInteger(index))),
-      results
-    };
-  } catch {
-    return { openGroups: [], completedGroups: [], results: [] };
-  }
-}
 
-export async function getLobbySnapshot(playerId: string) {
-  const available = await checkPocketBase();
-  if (available) {
-    try {
-      // 旧实现为了算「我的排名」全量拉取 players（500 并发下是主要瓶颈）。
-      // 改为：只取当前玩家本人 + 用 count 查询求名次（totalScore 已建索引），不再加载全表。
-      const playerRecord = await pb.collection("players").getOne(playerId).catch(() => null);
-      const player = playerRecord ? mapPlayerRecord(playerRecord) : null;
-
-      const [aheadCount, playerResults, games] = await Promise.all([
-        player
-          ? pb.collection("players").getList(1, 1, {
-              filter: pb.filter("totalScore > {:score}", { score: player.totalScore }),
-              fields: "id"
-            })
-          : Promise.resolve({ totalItems: 0 }),
-        // player 字段已建索引，该过滤查询命中索引而非全表扫描。
-        pb.collection("game_results").getFullList({
-          filter: pb.filter("player = {:playerId}", { playerId }),
-          sort: "completedAt"
-        }),
-        pb.collection("games").getFullList({ sort: "order" })
-      ]);
-
-      const results: GameResult[] = playerResults.map(mapResultRecord);
-      const state: AppState = {
-        players: player ? [player] : [],
-        gameResults: results,
-        games: games.map(mapGameRecord),
-        questions: []
-      };
-      return {
-        state,
-        player,
-        // 按总分计算名次：领先我的人数 + 1（同分并列取较优名次）。
-        rank: player ? aheadCount.totalItems + 1 : 0,
-        results,
-        quizProgress: buildQuizProgress(state, playerId)
-      };
-    } catch {
-      // PocketBase 查询失败时不使用本地缓存兜底，走空状态。
-    }
-  }
-
-  const state = await loadState();
-  const player = state.players.find((item) => item.id === playerId) || null;
-  return {
-    state,
-    player,
-    rank: player ? getPlayerRank(state.players, player.id) : 0,
-    results: state.gameResults.filter((result) => result.player === playerId),
-    quizProgress: buildQuizProgress(state, playerId)
-  };
-}
-
-// 排行榜：players 走服务端缓存接口 /api/ranking-data（TTL=2s），games 直查。
-// 旧实现走 loadState() 会额外全量加载 game_results 和 questions（排行榜完全用不到），
-// 且每个客户端各自全量扫描 players，在高并发下是主要瓶颈。
-export async function getRankingSnapshot(playerId?: string | null) {
-  const available = await checkPocketBase();
-  if (!available) {
-    const empty = getEmptyRuntimeState();
-    return {
-      players: empty.players,
-      games: empty.games,
-      results: [] as GameResult[],
-      top10: [],
-      officeAverage: [],
-      officeTop3: [],
-      context: null
-    };
-  }
-
-  try {
-    // players 走服务端缓存接口（TTL=2s），高并发下避免每个客户端各自全表扫描；
-    // games 是 4 行小表，直接查询即可（并发成本可忽略）。
-    const [rankData, gameRecords] = await Promise.all([
-      pb.send("/api/ranking-data", { method: "GET" }) as Promise<{ players: unknown[] }>,
-      pb.collection("games").getFullList({ sort: "order" })
-    ]);
-    const players = (rankData?.players || []).map((r) => mapPlayerRecord(r));
-    const games = gameRecords.map(mapGameRecord);
-    return {
-      players,
-      games: games.length > 0 ? games : GAMES,
-      // results 仅作为 result 页的兜底来源（snapshot.results 优先），排行榜本身不依赖它。
-      results: [] as GameResult[],
-      top10: getTop10Ranking(players),
-      officeAverage: getOfficeAverageRanking(players),
-      officeTop3: getOfficeTop3(players),
-      context: playerId ? getPlayerRankingContext(players, playerId) : null
-    };
-  } catch (error) {
-    console.error("❌ getRankingSnapshot 失败:", error);
-    const empty = getEmptyRuntimeState();
-    return {
-      players: empty.players,
-      games: empty.games,
-      results: [] as GameResult[],
-      top10: [],
-      officeAverage: [],
-      officeTop3: [],
-      context: null
-    };
-  }
-}
 
 export async function resetDemoData(): Promise<void> {
   if (!isBrowser()) return;
@@ -1015,47 +852,3 @@ export async function resetDemoData(): Promise<void> {
   window.localStorage.removeItem(PLAYER_CACHE_KEY);
 }
 
-export function subscribeToState(callback: () => void): () => void {
-  let unsub: (() => void) | null = null;
-  let disposed = false;
-
-  const setUnsub = (nextUnsub: () => void) => {
-    if (disposed) {
-      nextUnsub();
-      return;
-    }
-    unsub = nextUnsub;
-  };
-
-  checkPocketBase().then(available => {
-    if (disposed) return;
-
-    if (!available) {
-      if (isBrowser()) {
-        const handler = () => callback();
-        window.addEventListener("annual-game-state-change", handler);
-        window.addEventListener("storage", handler);
-        setUnsub(() => {
-          window.removeEventListener("annual-game-state-change", handler);
-          window.removeEventListener("storage", handler);
-        });
-      }
-      return;
-    }
-
-    Promise.all([
-      pb.collection("players").subscribe("*", callback),
-      pb.collection("game_results").subscribe("*", callback),
-      pb.collection("games").subscribe("*", callback)
-    ]).then(unsubs => {
-      setUnsub(() => unsubs.forEach(u => u()));
-    }).catch((error) => {
-      console.warn("PocketBase realtime subscribe failed; polling fallback remains active.", error);
-    });
-  });
-
-  return () => {
-    disposed = true;
-    unsub?.();
-  };
-}

@@ -1,5 +1,9 @@
 /// <reference path="../pb_data/types.d.ts" />
 
+// 保留原因：gateway（realtime-gateway/:8100）全挂时作为最后回退——
+// Next.js API 层 /api/state 在 Redis 未命中且 gateway 不可达时直接调用此端点，
+// 保证排行榜在极端故障下仍可降级展示（见 docs/superpowers/deploy/）。
+
 // 排行榜聚合数据：服务端内存缓存（TTL=2s）。
 // 关键点：
 // 1) PocketBase JSVM 路由处理器无法访问文件级变量，状态放进 app.store()

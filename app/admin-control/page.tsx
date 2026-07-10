@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import Layout from "@/components/Layout";
 import { GAME_ORDER, GAME_DISPLAY_NAMES } from "@/lib/constants";
-import { loadState, resetDemoData } from "@/lib/storage";
+import { resetDemoData } from "@/lib/storage";
+import { loadStateFromPB } from "@/lib/pb-storage";
 import { useAdminActions, useAppState, useAdminStats, useAllQuestions } from "@/hooks/use-game-data";
 import type { GameKey } from "@/types";
 
@@ -211,7 +212,7 @@ export default function AdminControlPage() {
   }
 
   async function handleExport() {
-    const state = await loadState();
+    const state = await loadStateFromPB();
     setExportText(JSON.stringify(state, null, 2));
   }
 

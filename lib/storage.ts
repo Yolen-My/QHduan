@@ -4,8 +4,8 @@ import * as pbStorage from "@/lib/pb-storage";
 import { calculateBingoSelection } from "@/lib/bingo-scoring";
 import { GAME_ORDER, GAMES, PLAYER_CACHE_KEY, PLAYER_ID_KEY, PLAYER_PHONE_KEY, STATE_KEY } from "@/lib/constants";
 import { settlePendingBingoResults } from "@/lib/game-state";
-import { getOfficeAverageRanking, getOfficeTop3, getPlayerRank, getPlayerRankingContext, getTop10Ranking } from "@/lib/ranking";
-import type { AppState, GameKey, GameResult, Player, Question, QuizProgress, QuizSessionSnapshot } from "@/types";
+import { getPlayerRank } from "@/lib/ranking";
+import type { AppState, GameKey, GameResult, Player, Question } from "@/types";
 
 let usePocketBase = false;
 
@@ -106,28 +106,6 @@ function getCompletedGamesForPlayer(player: Player, playerResults: GameResult[])
   return GAME_ORDER.filter((key) => completedGames.has(key));
 }
 
-function buildQuizProgress(state: AppState, playerId: string): QuizProgress {
-  const quizGame = state.games.find((game) => game.key === "quiz");
-  const openGroups = normalizeQuizOpenGroups(quizGame?.quizOpenGroups || []);
-  const quizResults = state.gameResults
-    .filter((result) => result.player === playerId && result.gameKey === "quiz" && !result.pendingBingoScore)
-    .map(normalizeGameResult);
-  const completedGroups = normalizeQuizOpenGroups(quizResults
-    .map((result) => result.quizSessionIndex)
-    .filter((index): index is number => Number.isInteger(index)));
-  const completedSet = new Set(completedGroups);
-  const availableGroups = openGroups.filter((group) => !completedSet.has(group));
-
-  return {
-    completedCount: completedGroups.length,
-    totalCount: 5,
-    score: quizResults.reduce((sum, result) => sum + result.score, 0),
-    maxScore: 100,
-    openGroups,
-    availableGroups,
-    completedGroups
-  };
-}
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -219,15 +197,6 @@ function saveStateLocal(state: AppState): void {
   if (!isBrowser()) return;
   window.localStorage.setItem(STATE_KEY, JSON.stringify(state));
   window.dispatchEvent(new Event("annual-game-state-change"));
-}
-
-export async function loadState(): Promise<AppState> {
-  const available = await checkBackend();
-  if (available) {
-    return await pbStorage.loadStateFromPB();
-  }
-  console.warn("⚠️ PocketBase 不可用，运行时不使用本地玩家/题库兜底");
-  return getEmptyRuntimeState();
 }
 
 export async function saveState(state: AppState): Promise<void> {
@@ -639,60 +608,13 @@ export async function getQuestions(gameKey: GameKey) {
     return await pbStorage.getQuestions(gameKey);
   }
 
-  const state = await loadState();
+  const state = loadStateLocal();
   return state.questions
     .map(normalizeQuestion)
     .filter((question) => question.gameKey === gameKey && question.isActive)
     .sort((a, b) => a.order - b.order);
 }
 
-export async function getQuizSessionSnapshot(playerId: string): Promise<QuizSessionSnapshot> {
-  const available = await checkBackend();
-  if (available) {
-    return await pbStorage.getQuizSessionSnapshot(playerId);
-  }
-  const state = loadStateLocal();
-  const quizGame = state.games.find((game) => game.key === "quiz");
-  const results = state.gameResults
-    .filter((result) => result.player === playerId && result.gameKey === "quiz")
-    .map(normalizeGameResult);
-  return {
-    openGroups: normalizeQuizOpenGroups(quizGame?.quizOpenGroups || []),
-    completedGroups: normalizeQuizOpenGroups(results
-      .map((result) => result.quizSessionIndex)
-      .filter((index): index is number => Number.isInteger(index))),
-    results
-  };
-}
-
-export async function getLobbySnapshot(playerId: string) {
-  const available = await checkBackend();
-  if (available) {
-    return await pbStorage.getLobbySnapshot(playerId);
-  }
-  const state = await loadState();
-  const player = state.players.find((item) => item.id === playerId) || getCachedPlayer(playerId);
-  return {
-    state,
-    player,
-    rank: player ? getPlayerRank(state.players, player.id) : 0,
-    results: state.gameResults.filter((result) => result.player === playerId),
-    quizProgress: buildQuizProgress(state, playerId)
-  };
-}
-
-export async function getRankingSnapshot(playerId?: string | null) {
-  const state = await loadState();
-  return {
-    players: state.players,
-    games: state.games,
-    results: state.gameResults,
-    top10: getTop10Ranking(state.players),
-    officeAverage: getOfficeAverageRanking(state.players),
-    officeTop3: getOfficeTop3(state.players),
-    context: playerId ? getPlayerRankingContext(state.players, playerId) : null
-  };
-}
 
 export async function resetDemoData(): Promise<void> {
   const available = await checkBackend();
@@ -707,10 +629,6 @@ export async function resetDemoData(): Promise<void> {
   window.localStorage.removeItem(PLAYER_PHONE_KEY);
   window.localStorage.removeItem(PLAYER_CACHE_KEY);
   loadStateLocal();
-}
-
-export function subscribeToState(callback: () => void): () => void {
-  return pbStorage.subscribeToState(callback);
 }
 
 export { PLAYER_ID_KEY, PLAYER_PHONE_KEY };
