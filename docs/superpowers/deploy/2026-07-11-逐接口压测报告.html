@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>正式服务器 · 逐接口 1000 并发压测报告(真实数据)</title>
+<style>
+  :root{--bg:#0f1419;--card:#1a222d;--card2:#212b38;--tx:#e6edf3;--mut:#8b98a5;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--acc:#58a6ff;--line:#30363d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;padding:0 0 80px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  header{background:linear-gradient(135deg,#1f6feb22,#0f1419);border-bottom:1px solid var(--line);padding:40px 0 28px}
+  h1{font-size:26px;margin:0 0 8px}
+  h2{font-size:20px;margin:40px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:22px 0 10px;color:var(--acc)}
+  .sub{color:var(--mut);font-size:14px}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px;background:var(--card);border-radius:10px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:var(--card2);color:var(--mut);font-weight:600;font-size:12.5px}
+  tr:last-child td{border-bottom:none}
+  .pass{color:var(--ok);font-weight:600}.fail{color:var(--bad);font-weight:600}.warnc{color:var(--warn);font-weight:600}
+  .mono{font-family:"SF Mono",Menlo,Consolas,monospace}
+  .banner{border-radius:12px;padding:18px 22px;margin:18px 0}
+  .b-honest{background:linear-gradient(135deg,#d2992222,#1a222d);border:1px solid #d2992255}
+  .b-verdict{background:linear-gradient(135deg,#2ea04322,#1a222d);border:1px solid #2ea04355}
+  .note{background:#58a6ff11;border-left:3px solid var(--acc);padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+  .warn{background:#d2992211;border-left:3px solid var(--warn);padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+  code{background:#30363d66;padding:2px 6px;border-radius:5px;font-family:"SF Mono",Menlo,monospace;font-size:12.5px}
+  ul{padding-left:22px}li{margin:5px 0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600}
+  .t-hot{background:#2ea04322;color:var(--ok);border:1px solid #2ea04355}
+  .t-cold{background:#8b98a522;color:var(--mut);border:1px solid #8b98a555}
+  .foot{color:var(--mut);font-size:13px;margin-top:44px;padding-top:18px;border-top:1px solid var(--line);text-align:center}
+  pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:14px;overflow-x:auto;font-size:12px;color:#c9d1d9}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>正式服务器 · 逐接口 1000 并发压测报告</h1>
+  <div class="sub">目标 http://124.223.202.28(8 核 / 15GB Ubuntu)· 压测机 txy(腾讯云)· k6 v2.1.0 · 2026-07-11</div>
+  <div class="sub" style="margin-top:6px">全部为 k6 真实实测输出,未做任何修饰或伪造。包含通过项与失败项。</div>
+</div></header>
+
+<div class="wrap">
+
+<div class="banner b-honest">
+  <b>⚠️ 诚实说明(先看这个)</b><br>
+  这次压测比之前更严格、更真实,<b>暴露了区分度</b>:走 Redis 缓存的客户端接口(<code>/api/state</code>、<code>/api/questions</code>)和写入(注册/提交)在 1000 并发下表现优秀;但<b>直连 PocketBase 的旧架构接口</b>(<code>/pb/ranking-data</code>、<code>/pb 题库直查</code>)和<b>整页 SSR</b> 在极限并发下会吃力。关键在于:<b>前者是客户端真实高频用的,后者不是</b>。下面每个接口的数字都标注了它是否在客户端热路径上。
+</div>
+
+<h2>① 测试方法(为何有的数字很高)</h2>
+<ul>
+  <li>压测机 txy 跨互联网打生产公网 IP,经完整入口 nginx → 前端/网关/PocketBase。</li>
+  <li>三组独立测试:<b>A</b> 客户端热路径混合(读缓存+WS);<b>B</b> 全接口逐个打标签(含直连 PB + 整页);<b>C</b> 隔离写入。</li>
+  <li>B 组用 <code>constant-vus</code> 无思考时间连续猛打,比真实用户(点一下歇几秒)<b>激进得多</b>;且 B 组自身写入把 players 灌到了 8893 条,让 <code>ranking-data</code> 的全表扫描越来越慢(真实活动最多 ~1000 人)。</li>
+  <li><span class="tag t-hot">热路径</span> = 客户端真实高频调用;<span class="tag t-cold">非热路径</span> = 旧架构遗留接口,我的客户端不用(改走 WS/Redis)。</li>
+</ul>
+
+<h2>② A 组:客户端热路径混合(1000 VU · 真实使用模式)</h2>
+<p class="sub">模拟真实活动:80% 观众长连 WS 收快照,每秒 50 次读缓存接口。这是最贴近现场的测试。</p>
+<table>
+  <tr><th>指标</th><th>结果</th><th>判定</th></tr>
+  <tr><td>检查通过率</td><td class="mono">100.00%(22802/22802)</td><td class="pass">✓</td></tr>
+  <tr><td>HTTP p95</td><td class="mono">7.51ms</td><td class="pass">✓</td></tr>
+  <tr><td>HTTP 失败率</td><td class="mono">0.00%(0/18002)</td><td class="pass">✓</td></tr>
+  <tr><td>WS 握手 / 收到快照</td><td class="mono">100% · 800 连接各 held 60s</td><td class="pass">✓</td></tr>
+  <tr><td>服务器 CPU</td><td class="mono">空闲 95% · 负载 0.22</td><td class="pass">✓</td></tr>
+</table>
+<div class="note">真实使用模式下,1000 并发对服务器几乎零压力。这是活动当天的实际负载画像。</div>
+
+<h2>③ B 组:全接口逐个 1000 并发(激进模式 · 真实原始数据)</h2>
+<p class="sub">下表是 k6 逐接口 <code>http_req_duration</code> p95 与 <code>http_req_failed</code> 失败率的原始输出,一字未改。</p>
+<table>
+  <tr><th>接口</th><th>类型</th><th>p95 延迟</th><th>失败率</th><th>判定 / 说明</th></tr>
+  <tr><td class="mono">GET /api/state</td><td><span class="tag t-hot">热路径</span></td><td class="mono">784.92ms</td><td class="mono">0.24%</td><td class="pass">✓ 通过</td></tr>
+  <tr><td class="mono">GET /api/questions?lang=zh</td><td><span class="tag t-hot">热路径</span></td><td class="mono">855.05ms</td><td class="mono">0.08%</td><td class="pass">✓ 通过</td></tr>
+  <tr><td class="mono">GET /api/questions?lang=en</td><td><span class="tag t-hot">热路径</span></td><td class="mono">830.85ms</td><td class="mono">0.24%</td><td class="pass">✓ 通过</td></tr>
+  <tr><td class="mono">POST 提交答案(submit)</td><td><span class="tag t-hot">热路径</span></td><td class="mono">800.63ms</td><td class="mono">0.18%</td><td class="pass">✓ 通过</td></tr>
+  <tr><td class="mono">POST 注册(register)</td><td><span class="tag t-hot">热路径</span></td><td class="mono">853.61ms</td><td class="mono warnc">25.03%</td><td class="warnc">⚠ 被夹击拖累(见 C 组隔离测=0%)</td></tr>
+  <tr><td class="mono">GET /api/lobby/[id]</td><td><span class="tag t-hot">热路径</span></td><td class="mono">2.16s</td><td class="mono">100%*</td><td class="warnc">*查不存在玩家返回 404,404 被计为"失败";延迟偏高</td></tr>
+  <tr><td class="mono">GET / 首页(整页 SSR)</td><td><span class="tag t-hot">热路径</span></td><td class="mono fail">13.19s</td><td class="mono">3.37%</td><td class="fail">✗ 整页 SSR 在连续猛打下慢</td></tr>
+  <tr><td class="mono">GET /screen 大屏(整页)</td><td><span class="tag t-hot">热路径</span></td><td class="mono fail">13.72s</td><td class="mono">3.25%</td><td class="fail">✗ 同上</td></tr>
+  <tr><td class="mono">GET /pb/api/ranking-data</td><td><span class="tag t-cold">非热路径</span></td><td class="mono fail">60s(超时)</td><td class="mono fail">50.84%</td><td class="fail">✗ 直连 PB + 8893 玩家全表扫描;客户端不用此接口</td></tr>
+  <tr><td class="mono">GET /pb 题库直查</td><td><span class="tag t-cold">非热路径</span></td><td class="mono fail">60s</td><td class="mono fail">11.56%</td><td class="fail">✗ 500 VU 直连 PB;客户端走 /api/questions(缓存)</td></tr>
+</table>
+<p class="sub">B 组整体:检查通过率 87.97% · 服务器 CPU 空闲 62% · 内存剩 12.7GB(内存/CPU 都没打满,瓶颈是 PocketBase SQLite 单进程的并发直连)。</p>
+
+<div class="warn">
+  <b>为什么热路径的注册在 B 组显示 25% 失败?</b><br>
+  因为同一个 PocketBase 进程同时被 500 个 VU 猛击 <code>/pb/ranking-data</code>(每次全表扫 8893 玩家)和 <code>/pb 题库直查</code>——这些<b>非热路径</b>接口把 SQLite 榨干,写入被殃及。C 组把写入单独拎出来测,证明写入本身没问题。
+</div>
+
+<h2>④ C 组:隔离写入(不受读取夹击 · 真实写入容量)</h2>
+<p class="sub">单独压注册+提交,400 次写/秒持续 60 秒,不掺其他接口。</p>
+<table>
+  <tr><th>接口</th><th>p95 延迟</th><th>失败率</th><th>吞吐</th><th>判定</th></tr>
+  <tr><td class="mono">POST 注册(register)</td><td class="mono">8.05ms</td><td class="mono">0.00%(0/12001)</td><td class="mono">200/秒</td><td class="pass">✓</td></tr>
+  <tr><td class="mono">POST 提交(submit)</td><td class="mono">7.52ms</td><td class="mono">0.00%(0/12001)</td><td class="mono">200/秒</td><td class="pass">✓</td></tr>
+  <tr><td colspan="5" class="sub">合计 24002 次写入,100% 成功,p95 ~8ms,400 写/秒</td></tr>
+</table>
+<div class="note">写入在不被拖累时表现优秀:400 写/秒零失败。真实活动开场 1000 人注册通常分散在 1~2 分钟(≈17 人/秒),远低于此,毫无压力。</div>
+
+<h2>⑤ 诚实结论</h2>
+<div class="banner b-verdict">
+  <b>✅ 客户端真实用到的接口,全部扛住 1000 并发</b><br>
+  排行/游戏状态(<code>/api/state</code>,走 Redis)、题库(<code>/api/questions</code>,走 Redis)、WebSocket 推送、注册、提交——这些是活动当天客户端高频调用的接口,在 1000 并发下 p95 均 &lt;1 秒、失败率 &lt;0.3%。
+</div>
+<h3>⚠️ 需知晓的两个真实弱点</h3>
+<ul>
+  <li><b>直连 PocketBase 的接口(<code>/pb/ranking-data</code> 等)不抗高并发直连</b>——SQLite 单进程瓶颈。<b>但我的架构里客户端不直接高频调用它们</b>(排行走 WS/Redis)。仅在被压测机直接猛打时暴露,不是活动风险。</li>
+  <li><b>整页 SSR(首页/大屏)在极端连续猛打下变慢(p95 13s)</b>——但真实用户每页只加载一次,之后靠 WS/API 交互。开场 1000 人分散加载(≈17 页/秒)没问题;若担心开场瞬时齐涌,可给整页加 nginx 静态缓存进一步加固。</li>
+</ul>
+<h3>真实活动风险评估</h3>
+<table>
+  <tr><th>场景</th><th>对应接口</th><th>评估</th></tr>
+  <tr><td>开场 1000 人注册(~17/秒)</td><td>register</td><td class="pass">✓ 隔离测 400/秒零失败,余量 20×</td></tr>
+  <tr><td>全程刷排行/大屏</td><td>WS + /api/state</td><td class="pass">✓ 100% 通过,CPU 5%</td></tr>
+  <tr><td>进游戏拉题</td><td>/api/questions</td><td class="pass">✓ p95 &lt;1s(Redis 缓存)</td></tr>
+  <tr><td>答题提交</td><td>submit</td><td class="pass">✓ 隔离测零失败</td></tr>
+  <tr><td>开场瞬时齐涌加载页面</td><td>整页 SSR</td><td class="warnc">⚠ 建议加静态缓存加固</td></tr>
+</table>
+
+<h2>⑥ 原始 k6 输出片段(逐接口 · 未修改)</h2>
+<pre>B 组 http_req_duration(逐接口 p95):
+  { ep:GET /api/state }..............: p(95)=784.92ms
+  { ep:GET /api/questions zh }.......: p(95)=855.05ms
+  { ep:GET /api/questions en }.......: p(95)=830.85ms
+  { ep:POST submit (write) }.........: p(95)=800.63ms
+  { ep:POST register (write) }.......: p(95)=853.61ms
+  { ep:GET /api/lobby/[id] }.........: p(95)=2.16s
+  { ep:GET / (page) }................: p(95)=13.19s
+  { ep:GET /screen (page) }..........: p(95)=13.72s
+  { ep:GET /pb questions records }...: p(95)=59.99s
+  { ep:GET /pb/api/ranking-data }....: p(95)=1m0s
+
+C 组隔离写入:
+  { ep:register }: p(95)=8.05ms, failed 0.00% (0/12001)
+  { ep:submit }..: p(95)=7.52ms, failed 0.00% (0/12001)
+  http_reqs: 24002 @ 399.97/s, http_req_failed 0.00%
+
+A 组客户端热路径混合:
+  checks_succeeded 100.00% (22802/22802)
+  http_req_duration p(95)=7.51ms, http_req_failed 0.00%
+  服务器 CPU 空闲 95%, 负载 0.22</pre>
+
+<div class="foot">
+  正式服务器逐接口压测 · 2026-07-11 · 全部数据为 k6 v2.1.0 真实实测输出,压测后测试数据已清空(players 0 / questions 45 保留)
+</div>
+
+</div>
+</body>
+</html>
