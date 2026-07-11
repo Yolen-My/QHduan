@@ -133,6 +133,12 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
   const openMissions = eliminationGame?.quizOpenGroups || [];
   const eliminationIsOpen = Boolean(eliminationGame?.isOpen);
 
+  // 开启过后即便关闭也停留在游戏页，不退回未开放状态。
+  const [eliminationWasOpened, setEliminationWasOpened] = useState(false);
+  useEffect(() => {
+    if (eliminationIsOpen) setEliminationWasOpened(true);
+  }, [eliminationIsOpen]);
+
   const gameQuestions = useMemo(() => (
     questions
       .filter((question) => question.gameKey === "elimination" && question.isActive === true)
@@ -384,7 +390,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
     );
   }
 
-  if (!eliminationIsOpen && !existing) {
+  if (!eliminationIsOpen && !eliminationWasOpened && !existing) {
     return (
       <EliminationShell>
         <section className="quizStatusCard">
@@ -422,8 +428,7 @@ export default function EliminationClient({ initialMissionIndex = null }: { init
     return (
       <EliminationShell hideNavActions>
         <div className="quizPlayHeader">
-          <h2>{activeMission.missionName}</h2>
-          <p>{t("common.questionOf", { current: 1, total: 1 })}</p>
+          <h2>ABOUT HONGSHAN</h2>
         </div>
 
         {!existing && activeMission.isOpen && (

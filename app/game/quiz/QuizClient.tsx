@@ -35,15 +35,22 @@ function getSectorName(index: number): string {
   return `Sector ${index + 1}`;
 }
 
-function getSectorDisplayName(index: number): string {
+function getSectorDisplayName(index: number): ReactNode {
   const labels = [
-    "Sector 1 TECH",
-    "Sector 2\nSEED / X",
-    "Sector 3 CONSUMER",
-    "Sector 4 HEALTHCARE",
-    "Sector 5 HCEP/HSIF/HCHP"
+    { main: "Sector 1", sub: "TECH" },
+    { main: "Sector 2", sub: "SEED / X" },
+    { main: "Sector 3", sub: "CONSUMER" },
+    { main: "Sector 4", sub: "HEALTHCARE" },
+    { main: "Sector 5", sub: "HCEP/HSIF/HCHP" }
   ];
-  return labels[index] ?? `Sector ${index + 1}`;
+  const label = labels[index];
+  if (!label) return `Sector ${index + 1}`;
+  return (
+    <>
+      {label.main}
+      <span className="quizSectorSubtitle">{label.sub}</span>
+    </>
+  );
 }
 
 function isCorrectAnswer(question: Question, answer: string | undefined): boolean {
@@ -125,6 +132,13 @@ export default function QuizClient({ initialSectorIndex = null }: { initialSecto
   const quizGame = state.games.find((game) => game.key === "quiz");
   const quizIsOpen = Boolean(quizGame?.isOpen);
   const quizOpenGroups = quizGame?.quizOpenGroups || [];
+
+  // 记录本次会话内猎人快答是否曾被开启：开启后即便所有 Sector 关闭导致 isOpen 回落，
+  // 也应停留在 Sector 列表页，而非回到游戏未开放状态。
+  const [quizWasOpened, setQuizWasOpened] = useState(false);
+  useEffect(() => {
+    if (quizIsOpen) setQuizWasOpened(true);
+  }, [quizIsOpen]);
   const playerQuizResults = useMemo(() => (
     state.gameResults.filter((result) => result.player === playerId && result.gameKey === "quiz")
   ), [playerId, state.gameResults]);
@@ -294,7 +308,7 @@ export default function QuizClient({ initialSectorIndex = null }: { initialSecto
     );
   }
 
-  if (!quizIsOpen) {
+  if (!quizIsOpen && !quizWasOpened) {
     return (
       <QuizShell>
         <section className="quizStatusCard">

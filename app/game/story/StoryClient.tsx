@@ -133,6 +133,12 @@ export default function StoryClient({ initialGroupIndex = null }: { initialGroup
   const openGroups = storyGame?.quizOpenGroups || [];
   const storyIsOpen = Boolean(storyGame?.isOpen);
 
+  // 开启过后即便关闭也停留在游戏页，不退回未开放状态。
+  const [storyWasOpened, setStoryWasOpened] = useState(false);
+  useEffect(() => {
+    if (storyIsOpen) setStoryWasOpened(true);
+  }, [storyIsOpen]);
+
   const gameQuestions = useMemo(() => (
     questions
       .filter((question) => question.gameKey === "story" && question.isActive === true)
@@ -375,7 +381,7 @@ export default function StoryClient({ initialGroupIndex = null }: { initialGroup
     );
   }
 
-  if (!storyIsOpen && !existing) {
+  if (!storyIsOpen && !storyWasOpened && !existing) {
     return (
       <StoryShell>
         <section className="quizStatusCard">
