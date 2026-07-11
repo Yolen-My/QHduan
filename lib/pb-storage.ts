@@ -777,18 +777,32 @@ async function persistGameResult(
     sectorName: input.sectorName
   };
 
-  const created = await pb.collection("game_results").create({
-    player: result.player,
-    gameKey: result.gameKey,
-    answers: result.answers,
-    score: result.score,
-    maxScore: result.maxScore,
-    completedAt: result.completedAt,
-    pendingBingoScore: isPending,
-    quizSessionIndex: result.quizSessionIndex,
-    sectorKey: result.sectorKey,
-    sectorName: result.sectorName
-  });
+  let created;
+  try {
+    created = await pb.collection("game_results").create({
+      player: result.player,
+      gameKey: result.gameKey,
+      answers: result.answers,
+      score: result.score,
+      maxScore: result.maxScore,
+      completedAt: result.completedAt,
+      pendingBingoScore: isPending,
+      quizSessionIndex: result.quizSessionIndex,
+      sectorKey: result.sectorKey,
+      sectorName: result.sectorName
+    });
+  } catch (error) {
+    // 并发重复提交可能撞上 game_results 唯一索引(同玩家+同游戏+同 quiz 分组)。
+    // 回查确认:已存在成绩则视为「已完成」友好提示,与 registerPlayer 的手机号竞态处理一致。
+    const dupFilter = input.gameKey === "quiz"
+      ? pb.filter("player = {:p} && gameKey = {:g} && quizSessionIndex = {:s}", { p: result.player, g: result.gameKey, s: result.quizSessionIndex ?? 0 })
+      : pb.filter("player = {:p} && gameKey = {:g}", { p: result.player, g: result.gameKey });
+    const dup = await pb.collection("game_results").getFirstListItem(dupFilter).catch(() => null);
+    if (dup) {
+      throw new Error(input.gameKey === "quiz" ? "该组 Quiz 已完成，不能重复提交" : "该游戏已完成，不能重复提交");
+    }
+    throw error;
+  }
   result.id = created.id;
 
   if (isPending) {
