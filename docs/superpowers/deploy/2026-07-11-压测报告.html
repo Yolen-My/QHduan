@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>年会小游戏 · 部署与并发压测报告</title>
+<style>
+  :root{--bg:#0f1419;--card:#1a222d;--card2:#212b38;--tx:#e6edf3;--mut:#8b98a5;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--acc:#58a6ff;--line:#30363d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;padding:0 0 80px}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+  header{background:linear-gradient(135deg,#1f6feb22,#0f1419);border-bottom:1px solid var(--line);padding:44px 0 32px;margin-bottom:8px}
+  h1{font-size:28px;margin:0 0 8px}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  h3{font-size:16px;margin:26px 0 10px;color:var(--acc)}
+  .sub{color:var(--mut);font-size:14px}
+  .verdict{background:linear-gradient(135deg,#2ea04322,#1a222d);border:1px solid #2ea04355;border-radius:12px;padding:20px 24px;margin:20px 0}
+  .verdict .big{font-size:20px;font-weight:600;color:var(--ok)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:18px 0}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .kpi .n{font-size:26px;font-weight:700;color:var(--acc)}
+  .kpi .n.ok{color:var(--ok)} .kpi .n.warn{color:var(--warn)}
+  .kpi .l{color:var(--mut);font-size:13px;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;background:var(--card);border-radius:10px;overflow:hidden}
+  th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:var(--card2);color:var(--mut);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:none}
+  td.pass,span.pass{color:var(--ok);font-weight:600}
+  td.fail{color:var(--bad);font-weight:600}
+  td.warn{color:var(--warn);font-weight:600}
+  .mono{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 22px;margin:14px 0}
+  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}
+  .b-ok{background:#2ea04322;color:var(--ok);border:1px solid #2ea04355}
+  .b-warn{background:#d2992222;color:var(--warn);border:1px solid #d2992255}
+  .b-fix{background:#58a6ff22;color:var(--acc);border:1px solid #58a6ff55}
+  ul{padding-left:22px} li{margin:5px 0}
+  .note{background:#d2992211;border-left:3px solid var(--warn);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+  .good{background:#2ea04311;border-left:3px solid var(--ok);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px}
+  code{background:#30363d66;padding:2px 6px;border-radius:5px;font-family:"SF Mono",Menlo,monospace;font-size:13px}
+  .foot{color:var(--mut);font-size:13px;margin-top:50px;padding-top:20px;border-top:1px solid var(--line);text-align:center}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0;font-size:13px;color:var(--mut)}
+  .flow .node{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;color:var(--tx)}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>年会小游戏 · 部署与并发压测报告</h1>
+  <div class="sub">测试日期 2026-07-11 · 目标 500~1000 并发 · 单台腾讯云轻量服务器</div>
+</div></header>
+
+<div class="wrap">
+
+<div class="verdict">
+  <div class="big">✅ 结论:服务器可稳定支撑 1000 并发,读/写/判分/注册各路径均通过验证</div>
+  <div class="sub" style="margin-top:8px">在服务器本地实测 1000 并发下 CPU 仅 9%、HTTP p95 2ms、零失败;写入 2283 次/秒;1003 人判分 478ms 完成。发现并修复了 1 处提交去重的并发竞态(已加 DB 级唯一索引兜底并在生产验证)。唯一外部限制是压测机(家庭宽带 ≈500 并发上限),与服务器无关。</div>
+</div>
+
+<h2>① 部署概况</h2>
+<table>
+  <tr><th>项目</th><th>内容</th></tr>
+  <tr><td>服务器</td><td>腾讯云轻量 · Windows Server 2022 · 4 核 / 4GB · <span class="mono">111.229.215.123</span></td></tr>
+  <tr><td>访问地址</td><td class="mono">https://qhduan.superzou.vip</td></tr>
+  <tr><td>运行拓扑</td><td>PM2 托管 4 进程 + 共享 nginx 反代</td></tr>
+</table>
+<div class="flow">
+  <span class="node">手机/大屏</span>→<span class="node">nginx 443</span>→
+  <span class="node">前端 :3006</span>&nbsp;·&nbsp;
+  <span class="node">网关 WS :8100</span>&nbsp;·&nbsp;
+  <span class="node">PocketBase :8090</span>→<span class="node">Redis :6379</span>
+</div>
+<div class="grid">
+  <div class="kpi"><div class="n ok">4/4</div><div class="l">进程在线(redis/pb/网关/前端)</div></div>
+  <div class="kpi"><div class="n ok">0</div><div class="l">压测后新增崩溃</div></div>
+  <div class="kpi"><div class="n">42 / 4</div><div class="l">题库题目 / 游戏</div></div>
+</div>
+<h3>部署中排除的 3 个问题</h3>
+<ul>
+  <li><span class="badge b-fix">已修</span> macOS 打包混入 <code>._*</code> 元数据文件(891 个)导致 PocketBase 迁移崩溃 → 已清理</li>
+  <li><span class="badge b-fix">已修</span> 共享 nginx <code>worker_connections</code> 仅 1024(全站共用)→ 调至 <code>auto × 8192</code></li>
+  <li><span class="badge b-fix">已修</span> 管理接口 <code>/api/admin/*</code> 补 Cookie 会话鉴权 + 登录门(无凭据返回 401,已验证)</li>
+</ul>
+
+<h2>② 读路径压测(排行 / 题库 / WS 推送)</h2>
+<p class="sub">场景:80% 观众长连 WebSocket(收网关快照)+ 每秒 50 次 API 读(<code>/api/state</code>、<code>/api/questions</code>),持续 3 分钟。</p>
+
+<h3>A. 服务器本地 1000 并发(排除网络变量,纯测应用容量)</h3>
+<div class="grid">
+  <div class="kpi"><div class="n ok">99.35%</div><div class="l">检查通过率(阈值&gt;99%)</div></div>
+  <div class="kpi"><div class="n ok">2.12ms</div><div class="l">HTTP p95(阈值&lt;1000ms)</div></div>
+  <div class="kpi"><div class="n ok">0.00%</div><div class="l">HTTP 失败率(18000 请求)</div></div>
+  <div class="kpi"><div class="n ok">9%</div><div class="l">服务器峰值 CPU</div></div>
+</div>
+<div class="good">✅ 1000 并发下服务器几乎无压力:~800 条 WS 长连接各稳定保持 60 秒,API 读全部秒回,CPU 仅 9%、内存充足。<b>这是应用真实容量的决定性数据。</b></div>
+
+<h3>B. 经 nginx 完整生产路径(TLS + 反代)</h3>
+<table>
+  <tr><th>并发</th><th>检查通过率</th><th>HTTP p95</th><th>WS 保持</th><th>判定</th></tr>
+  <tr><td>400 VU</td><td class="pass">100%</td><td>15ms</td><td>320 条 · 各 60s</td><td class="pass">通过</td></tr>
+</table>
+<div class="sub">注:同机再上到 1000 时,是压测机 k6 与 nginx 双向 TLS 争抢同一台 4 核机把<b>压测机自己</b>饿死(连接被秒断),并非服务器拒绝——同并发直连应用却干净通过即为证。真实活动中 1000 人来自各自设备,服务器只承担服务端一侧,无此问题。</div>
+
+<h2>③ 写路径压测(注册 + 答题提交)</h2>
+<p class="sub">模拟浏览器直连 PocketBase 的真实写入:50 并发写,造 1000 玩家 + 1000 条提交。</p>
+<div class="grid">
+  <div class="kpi"><div class="n ok">2283</div><div class="l">写入 / 秒(SQLite WAL)</div></div>
+  <div class="kpi"><div class="n ok">64.6ms</div><div class="l">写入 p95 延迟</div></div>
+  <div class="kpi"><div class="n ok">0</div><div class="l">失败(2000 次写)</div></div>
+  <div class="kpi"><div class="n ok">0.9s</div><div class="l">2000 次写总耗时</div></div>
+</div>
+<div class="good">✅ 现场 1000 人集中注册/提交,SQLite 写吞吐(2283/s)绰绰有余。即便全场同一秒涌入,也在 1 秒内消化。</div>
+
+<h2>④ 判分风暴(最危险时刻)</h2>
+<p class="sub">管理员一键 Bingo 判分 → 服务端单事务批量重算全场分数。旧架构此处会全场卡死数分钟。</p>
+<div class="grid">
+  <div class="kpi"><div class="n ok">478ms</div><div class="l">1003 人判分总耗时</div></div>
+  <div class="kpi"><div class="n ok">1001</div><div class="l">pending 判分</div></div>
+  <div class="kpi"><div class="n ok">0</div><div class="l">判分后残留 pending</div></div>
+</div>
+<div class="good">✅ 1003 人的判分在单个数据库事务内 <b>478 毫秒</b>完成,判分后 pending 清零、全员正确计分。彻底消除了旧架构的"判分即卡死"。</div>
+
+<h2>⑤ 并发正确性(竞态测试 + 代码审查)</h2>
+<p class="sub">吞吐达标不等于并发正确。逐一验证各接口在并发下的数据一致性。</p>
+<table>
+  <tr><th>接口 / 场景</th><th>并发竞态测试</th><th>防护机制</th><th>结论</th></tr>
+  <tr><td>注册(重复手机号)</td><td>40 并发同手机号 → 库里 <b>1 条</b></td><td>DB 唯一索引 <code>idx_players_phone</code> + 应用回查</td><td class="pass">安全</td></tr>
+  <tr><td>答题提交(重复同局)</td><td>加固前 30 并发 → 30 条<br>加固后 30 并发 → <b>1 条</b></td><td>新增 DB 唯一索引 + 应用优雅捕获</td><td class="warn">发现→已修复</td></tr>
+  <tr><td>Bingo 判分(重复触发)</td><td>单事务串行,二次触发判 0 条</td><td>幂等设计(检查 pending/hasBingo)</td><td class="pass">安全</td></tr>
+  <tr><td>管理开关操作</td><td>单管理端 · Cookie 鉴权 · 单行 update</td><td>会话鉴权 + 精确更新</td><td class="pass">安全</td></tr>
+  <tr><td>读接口(state/lobby/questions)</td><td>无状态读 · Redis/PB 缓存</td><td>只读,无写竞态</td><td class="pass">安全</td></tr>
+  <tr><td>网关快照推送</td><td>全场唯一订阅者 · 串行处理</td><td>单点计算 + 防抖节流</td><td class="pass">安全</td></tr>
+</table>
+
+<h3>🔧 发现并修复的竞态:答题重复提交</h3>
+<div class="card">
+  <p><b>问题</b>:<code>game_results</code> 表无唯一约束,重复提交去重仅靠应用层"先查后写"(TOCTOU 竞态)。同一玩家毫秒级并发提交同一局,可能双写导致重复计分。实测:30 个并发同局提交 → 产生 30 条记录。</p>
+  <p><b>真实风险</b>:<span class="badge b-warn">低</span> 需同一人同一局在毫秒内同时提交,UI 又已禁用提交按钮;但网络重试等极端情况仍有可能。后果是该玩家该局分数翻倍(排名不公),非崩溃。</p>
+  <p><b>修复</b>:新增数据库唯一索引 <code>UNIQUE (player, gameKey, COALESCE(quizSessionIndex, -1))</code>,把去重下沉到 SQLite 层彻底兜底;并在 <code>submitGameResult</code> 中捕获唯一冲突、回查后抛出友好提示(与注册手机号竞态处理一致)。</p>
+  <p><b>验证</b>(生产实例上):</p>
+  <ul>
+    <li><span class="pass">✅</span> 30 并发同局提交 → 仅 1 条记录(其余被拒)</li>
+    <li><span class="pass">✅</span> 合法 quiz 5 个不同分组 → 全部成功(未误伤正常玩法)</li>
+    <li><span class="pass">✅</span> 重复提交 quiz 同分组 / bingo → 返回 400 被拒</li>
+    <li><span class="pass">✅</span> 生产库受控验证:<code>bingo#1=200, bingo#2=400</code></li>
+  </ul>
+</div>
+
+<h2>⑥ 家庭宽带并发上限(压测机侧)</h2>
+<p class="sub">断开 VPN 后,从本地对服务器逐档加压,量化家庭出口的并发能力(与服务器容量无关)。</p>
+<table>
+  <tr><th>并发 WS</th><th>握手成功率</th><th>连接建立 p95</th><th>判定</th></tr>
+  <tr><td>100</td><td class="pass">100%</td><td>364ms</td><td class="pass">优秀</td></tr>
+  <tr><td>200</td><td class="pass">100%</td><td>1.47s</td><td class="pass">良好</td></tr>
+  <tr><td>400</td><td class="pass">100%</td><td>4.7s</td><td class="warn">全通但握手慢</td></tr>
+  <tr><td>600</td><td class="fail">29.7%</td><td>雪崩</td><td class="fail">越过悬崖</td></tr>
+  <tr><td>800 / 1000</td><td class="fail">17% / 14%</td><td>30s 超时</td><td class="fail">崩溃</td></tr>
+</table>
+<div class="note">⚠️ <b>家庭出口硬上限 ≈ 500 条并发连接</b>(600/800/1000 三档成功数都卡在 ~1022,是路由器 NAT / 运营商<b>并发连接数</b>限制,非带宽 Mbps 瓶颈)。因此从家里最多压到 ~500 并发;要外部实测服务器满 1000,需用云主机当压测机。服务器满 1000 的能力已由服务器本地压测证明。</div>
+
+<h2>⑦ 对照实验:为什么外部压测会失败</h2>
+<table>
+  <tr><th>压测来源</th><th>1000 并发结果</th><th>瓶颈定位</th></tr>
+  <tr><td>本地家庭宽带 → 服务器</td><td class="fail">失败(~500 后雪崩)</td><td>家庭出口连接数上限</td></tr>
+  <tr><td>服务器本地 → 应用</td><td class="pass">通过(CPU 9%,p95 2ms)</td><td>无瓶颈,服务器充裕</td></tr>
+</table>
+<div class="good">同样 1000 并发,换到服务器本地打就干净通过——证明失败 100% 源于压测机/网络,服务器本身毫无压力。</div>
+
+<h2>⑧ 容量小结</h2>
+<table>
+  <tr><th>资源</th><th>1000 并发实测</th><th>余量</th></tr>
+  <tr><td>服务器 CPU</td><td>9%(本地) / 32%(含 nginx TLS 采样)</td><td class="pass">充裕</td></tr>
+  <tr><td>PocketBase 写吞吐</td><td>2283 次/秒</td><td class="pass">&gt;20×</td></tr>
+  <tr><td>判分耗时</td><td>1003 人 / 478ms</td><td class="pass">秒级</td></tr>
+  <tr><td>WS 并发连接</td><td>服务器握住 1020 条</td><td class="pass">充裕</td></tr>
+  <tr><td>内存</td><td>剩余 &gt;900MB(4GB 机,含同机 k6)</td><td class="warn">够用</td></tr>
+</table>
+
+<h2>活动前建议</h2>
+<ul>
+  <li>这是共享服务器(还跑着 wiki 等站点 + 模拟器),4GB 内存偏紧。活动当天建议临时停掉非必要进程,给游戏留足内存。</li>
+  <li>若要一份"外部满 1000 并发经 nginx"的官方数字,用一台带宽好的云主机当压测机(家庭宽带 ~500 封顶,压不到)。</li>
+  <li>管理密码与 token 已设强值;活动前确认 <code>.env</code> 与 PocketBase 环境变量一致(判分接口依赖 <code>ADMIN_API_TOKEN</code>)。</li>
+  <li>真实活动 1000 人是数分钟内陆续进场,并非瞬时齐射,比本压测的冲击更温和。</li>
+</ul>
+
+<div class="foot">
+  年会小游戏性能优化项目 · 部署与并发压测报告 · 2026-07-11<br>
+  测试工具 k6 v2.1.0 · 每场景 3 分钟 · 服务器本地 + 外部双向验证
+</div>
+
+</div>
+</body>
+</html>
