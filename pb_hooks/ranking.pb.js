@@ -1,52 +1,11 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// 保留原因：历史遗留的聚合缓存接口，当前无消费方（Next.js API 层不回退调用此端点）。
-// 保留作为 gateway（realtime-gateway/:8100）+ Redis 双故障时的手工应急数据源，
-// 可直接 curl /api/ranking-data 取排行榜快照。
-
-// 排行榜聚合数据：服务端内存缓存（TTL=2s）。
-// 关键点：
-// 1) PocketBase JSVM 路由处理器无法访问文件级变量，状态放进 app.store()
-//    （并发安全的进程内 KV，跨请求共享）。
-// 2) 缓存「已序列化好的响应体字符串」+ 时间戳（两个原始值，跨 executor 稳定）。
-//    命中时用 e.blob 直接回写字符串，完全跳过 JSON.parse / 再序列化——
-//    否则每个请求都对 ~1500 名玩家做一次解析+序列化，500 并发下 goja CPU 会成为新瓶颈。
-// 收益：高并发下同一时间窗内只触发 1 次全表读+1 次序列化，其余请求近乎零成本命中。
+// 【已禁用】/api/ranking-data 是 perfect-version 旧架构的遗留聚合接口。
+// 现架构下排行榜完全走 realtime-gateway + Redis 快照,前端与网关均不调用此端点
+// (代码库 grep 零引用)。旧实现每 2s 对全体玩家做一次全表扫描+序列化,
+// 在被直接高并发打时会成为无谓瓶颈,且对外多暴露一个可被打的读接口。
+// 因此改为直接返回 410 Gone,消除全表扫描与暴露面。若将来需要应急数据源,
+// 请走 GET /api/state(Next.js API,读 Redis 快照)。
 routerAdd("GET", "/api/ranking-data", (e) => {
-  try {
-    const TTL_MS = 2000;
-    const store = e.app.store();
-    const now = Date.now();
-
-    const at = store.get("rankingDataAt");
-    const body = store.get("rankingDataBody");
-    if (at && body && now - at <= TTL_MS) {
-      return e.blob(200, "application/json", body);
-    }
-
-    const players = e.app.findRecordsByFilter("players", "id != ''", "-totalScore", 100000, 0);
-    const mapped = [];
-    for (let i = 0; i < players.length; i++) {
-      const p = players[i];
-      // 仅输出排行榜计算/展示所需字段（comparePlayers 用 totalScore + 完成时间；分组用 office）。
-      mapped.push({
-        id: p.id,
-        name: p.getString("name"),
-        office: p.getString("office"),
-        team: p.getString("team"),
-        totalScore: p.getFloat("totalScore"),
-        finalSubmitted: p.getBool("finalSubmitted"),
-        finalCompletedAt: p.getString("finalCompletedAt"),
-        created: p.getDateTime("created").string(),
-        updated: p.getDateTime("updated").string()
-      });
-    }
-
-    const newBody = JSON.stringify({ players: mapped, cachedAt: now });
-    store.set("rankingDataAt", now);
-    store.set("rankingDataBody", newBody);
-    return e.blob(200, "application/json", newBody);
-  } catch (err) {
-    return e.json(500, { err: String(err && err.message ? err.message : err) });
-  }
+  return e.json(410, { error: "gone", message: "已废弃,请使用 /api/state(Redis 快照)" });
 });
