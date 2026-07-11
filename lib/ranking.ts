@@ -2,10 +2,12 @@ import type { OfficeAverageItem, OfficeTop3Group, Player, RankingItem } from "@/
 
 function comparePlayers(left: Player, right: Player): number {
   if (right.totalScore !== left.totalScore) return right.totalScore - left.totalScore;
-  const leftDone = left.finalCompletedAt || left.updated || left.created;
-  const rightDone = right.finalCompletedAt || right.updated || right.created;
+  // 空值安全:导入/历史数据可能缺 finalCompletedAt/updated/created 任一字段,
+  // 兜底为空串,避免 undefined.localeCompare 崩溃。
+  const leftDone = left.finalCompletedAt || left.updated || left.created || "";
+  const rightDone = right.finalCompletedAt || right.updated || right.created || "";
   if (leftDone !== rightDone) return leftDone.localeCompare(rightDone);
-  return left.created.localeCompare(right.created);
+  return (left.created || "").localeCompare(right.created || "");
 }
 
 export function buildRanking(players: Player[]): RankingItem[] {
