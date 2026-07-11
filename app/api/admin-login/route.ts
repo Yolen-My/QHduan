@@ -17,12 +17,16 @@ export async function POST(request: Request) {
     }
 
     if (username === adminUsername && password === adminPassword) {
+      // secure 依据真实访问协议(nginx 传的 X-Forwarded-Proto):
+      // HTTP 站点不设 Secure,否则 cookie 无法通过 HTTP 回传导致登录失效;
+      // 将来接入 HTTPS 会自动升级为 Secure。
+      const proto = request.headers.get("x-forwarded-proto") || "http";
       const res = NextResponse.json({ ok: true });
       res.cookies.set(ADMIN_COOKIE_NAME, getAdminSessionValue(), {
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        secure: process.env.NODE_ENV === "production"
+        secure: proto === "https"
       });
       return res;
     }
