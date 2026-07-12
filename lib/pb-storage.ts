@@ -334,8 +334,12 @@ export async function ensureCollections(): Promise<void> {
   if (!available) return;
 
   try {
-    await pb.collection("players").getFullList(1);
+    // 仅探测集合是否可访问:getList(1,1) 只发 1 次请求取 1 条。
+    // 注意不能用 getFullList(1)——那个 1 是 batch(每页条数),会把全体玩家
+    // 一页一条地全量拉取(N 个玩家 = N 次请求),玩家多时注册卡死数十秒。
+    await pb.collection("players").getList(1, 1, { skipTotal: true });
   } catch {
+    // 集合不存在时的一次性初始化(生产环境集合已存在,此分支不会触发)。
     try {
       await pb.collection("players").create({
         name: "temp",
@@ -354,7 +358,7 @@ export async function ensureCollections(): Promise<void> {
   }
 
   try {
-    await pb.collection("game_results").getFullList(1);
+    await pb.collection("game_results").getList(1, 1, { skipTotal: true });
   } catch {
     throw new Error("game_results collection not found");
   }
