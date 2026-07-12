@@ -7,6 +7,7 @@ import { useEffect, useMemo } from "react";
 import Layout from "@/components/Layout";
 import PageBackground from "@/components/PageBackground";
 import { getGameResult, getQuestions } from "@/lib/storage";
+import { isBingoCorrectQuestion, getBingoTargetWords } from "@/lib/bingo-scoring";
 import { useCurrentPlayer, useAppState, useAllQuestions } from "@/hooks/use-game-data";
 import type { GameKey, GameResult, Question } from "@/types";
 
@@ -27,10 +28,19 @@ function isCorrectAnswer(question: Question, userAnswer: unknown): boolean {
 
 function ReviewBingoBlock({ result, questions }: { result: GameResult; questions: Question[] }) {
   const t = useTranslations();
-  const answers = result.answers as { selectedWords?: string[]; targetWords?: string[]; correctCount?: number };
-  const selectedWords: string[] = answers.selectedWords || [];
-  const targetWords: string[] = answers.targetWords || [];
+  const answers = result.answers as { selectedQuestionIds?: string[]; selectedWords?: string[]; targetWords?: string[]; correctCount?: number };
   const correctCount: number = answers.correctCount || 0;
+
+  // 优先用 selectedQuestionIds(与语言无关)+ 当前语言题库重新解析,使 review 跟随界面语言。
+  // 提交时冻结的 selectedWords/targetWords 是玩家当时所用语言,直接显示会导致英文界面出现中文词。
+  // 无 ID 的旧数据回退到冻结值。
+  const byId = new Map(questions.map((q) => [q.id, q] as const));
+  const selectedIds = answers.selectedQuestionIds || [];
+  const resolvedSelected = selectedIds.map((id) => byId.get(id)).filter((q): q is Question => Boolean(q));
+  const canResolve = questions.length > 0 && selectedIds.length > 0 && resolvedSelected.length === selectedIds.length;
+
+  const selectedWords: string[] = canResolve ? resolvedSelected.map((q) => q.title) : (answers.selectedWords || []);
+  const targetWords: string[] = canResolve ? getBingoTargetWords(questions) : (answers.targetWords || []);
 
   return (
     <div className="reviewBlockContent">
@@ -42,7 +52,9 @@ function ReviewBingoBlock({ result, questions }: { result: GameResult; questions
       <div className="reviewBingoGrid">
         {Array.from({ length: 9 }).map((_, i) => {
           const word = selectedWords[i] || "";
-          const isTarget = targetWords.includes(word);
+          const isTarget = canResolve
+            ? (resolvedSelected[i] ? isBingoCorrectQuestion(resolvedSelected[i]) : false)
+            : targetWords.includes(word);
           return (
             <div className={`reviewBingoCell${isTarget ? " reviewBingoCell--correct" : " reviewBingoCell--wrong"}`} key={i}>
               {word}
