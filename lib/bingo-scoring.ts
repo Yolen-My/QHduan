@@ -6,7 +6,12 @@ function asStringArray(value: unknown): string[] {
 }
 
 export function isBingoCorrectQuestion(question: Question): boolean {
-  return question.gameKey === "bingo" && typeof question.correctAnswer === "string" && question.correctAnswer === question.title;
+  // 正确词的 correctAnswer 等于词本身(title),错误词为 "INCORRECT"。
+  // 用 trim 后比较,避免双语数据里个别词首尾空格(如 titleEn "Curiosity ")
+  // 导致精确相等失配、正确词被判成错误。
+  return question.gameKey === "bingo"
+    && typeof question.correctAnswer === "string"
+    && question.correctAnswer.trim() === question.title.trim();
 }
 
 export function getBingoTargetWords(questions: Question[]): string[] {

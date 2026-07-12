@@ -219,10 +219,15 @@ export function useAllQuestions() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    fetchQuestions("all")
+    const load = () => fetchQuestions("all")
       .then(setQuestions)
       .catch(() => setQuestions([]))
       .finally(() => setLoading(false));
+    load();
+    // 语言切换后按新语言重新拉取,否则 review 页停留在旧语言(如英文界面显示中文题目)。
+    if (typeof window === "undefined") return;
+    window.addEventListener("annual-game-locale-change", load);
+    return () => window.removeEventListener("annual-game-locale-change", load);
   }, []);
   return { questions, loading };
 }
